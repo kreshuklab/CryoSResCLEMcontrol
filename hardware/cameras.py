@@ -8,6 +8,7 @@ from datetime import datetime
 class _CameraDevice(QObject):
     _acquire    = pyqtSignal()
     _snap       = pyqtSignal()
+    _stopped    = pyqtSignal()
     
     frame_ready = pyqtSignal()
     acquisition_started  = pyqtSignal()
@@ -26,6 +27,10 @@ class _CameraDevice(QObject):
         self.roi_levels  = max(roi_levels,1)
         self.pix_size_nm = pix_size_nm
         
+        self.is_busy = False
+        self.is_acquiring   = False
+        self.done_acquiring = False
+        
         self.set_exp_time(exp_time_ms)
         if gain is not None:
             self.set_gain(gain)
@@ -34,15 +39,32 @@ class _CameraDevice(QObject):
         self.init_roi_list()
         self.set_roi_by_index(0)
         
-        self.is_busy = False
-        self.is_acquiring   = False
-        self.done_acquiring = False
+        self._update_configuration_function = None
+        
+        self._stopped.connect( self._update_configuration )
+        self._acquire.connect( self.acquire_frames )
+        
+    ##################################################### Configuration updater
+    
+    @pyqtSlot()
+    def _update_configuration(self):
+        if self._update_configuration_function is not None:
+            self._update_configuration_function()
+            self._update_configuration_function = None
+            self._acquire.emit()
         
     ############################################################# Exposure Time
-        
+    
+    def get_exp_time_range(self): # To Be Implemented by Child
+        return (0,500)
+    
     def set_exp_time(self,exp_time_ms):
         self.exp_time_ms = exp_time_ms
-        self.write_exp_time(self.exp_time_ms)
+        if self.is_acquiring:
+            self._update_configuration_function = self.write_exp_time()
+            self.stop_acquisition()
+        else:
+            self.write_exp_time()
     
     def get_exp_time(self):
         if self.is_busy:
@@ -60,10 +82,16 @@ class _CameraDevice(QObject):
     
     ###################################################################### Gain
     
+    def get_gain_range(self): # To Be Implemented by Child
+        return (0,0)
+    
     def set_gain(self,gain):
         print(f'set_gain not implemented ({self.uid}: {self.vendor} - {self.model})')
 
     ################################################################### Binning
+    
+    def get_binning_list(self): # To Be Implemented by Child
+        return (1,)
     
     def set_binning(self,binning):
         print(f'set_binning not implemented ({self.uid}: {self.vendor} - {self.model})')
@@ -131,6 +159,7 @@ class _CameraDevice(QObject):
         self.acquisition_started.emit()
         self._do_acquire_frames(max_frames)
         self.is_busy = False
+        self._stopped.emit()
         self.acquisition_finished.emit()
 
     def _do_acquire_frames(self,max_frames): # To Be Implemented by Child
@@ -148,7 +177,7 @@ class HamamatsuCamera(_CameraDevice):
     
     ############################################################# CTOR and DTOR
     
-    def __init__(self,name,camera_index=0,exposure_time=0.1):
+    def __init__(self,name,camera_index=0,exposure_time_ms=100):
         
         assert Dcamapi.init(), "Cannot connect to DCAM (Hamamatsu) driver."
         self.camera = Dcam(camera_index)
@@ -158,14 +187,11 @@ class HamamatsuCamera(_CameraDevice):
         model  = self.camera.dev_getstring(DCAM_IDSTR.MODEL)
         roi_levels = 2
         
-        super().__init__(name,vendor,model,roi_levels,136,exposure_time)
+        super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
         
         self.frame_timeout_ms = 1000
         self.set_cooler_on()
         self.set_uint16()
-        
-        self.roi_list.append( QRect(500,200,1000,1000) )
-        self.set_roi_by_index(1)
         
     def __del__(self):
         self.camera.dev_close()
@@ -214,11 +240,12 @@ class HamamatsuCamera(_CameraDevice):
         self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYMODE,DCAMPROP.MODE.ON)
         return True
         
-    def write_exp_time(self,exp_time_ms:float):
-        self.camera.prop_setgetvalue(DCAM_IDPROP.EXPOSURETIME,exp_time_ms)
+    def write_exp_time(self):
+        exp_time_sec = float(self.exp_time_ms)/1000
+        self.camera.prop_setgetvalue(DCAM_IDPROP.EXPOSURETIME,exp_time_sec)
     
     def read_exp_time(self):
-        return self.camera.prop_getvalue(DCAM_IDPROP.SENSORCOOLER)
+        return self.camera.prop_getvalue(DCAM_IDPROP.EXPOSURETIME)*1000
     
     ##################################################### Acquisition functions
     

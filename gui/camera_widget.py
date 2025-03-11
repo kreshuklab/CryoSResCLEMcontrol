@@ -2,7 +2,7 @@ from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtCore import QElapsedTimer, QPoint
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QOpenGLWidget
-from PyQt5.QtWidgets import QPushButton, QLabel, QLineEdit, QSpinBox
+from PyQt5.QtWidgets import QPushButton, QLabel, QLineEdit, QSpinBox, QComboBox
 from PyQt5.QtWidgets import QSizePolicy, QFrame
 from PyQt5.QtGui import QImage, QPixmap, QIcon, QFont, QPalette, QColor, QTransform
 import numpy as np
@@ -12,10 +12,10 @@ from gui.ui_utils import IconProvider
 
 ############################################################################### Create Button with Icon
 
-def _create_iconized_button(icon_file,text="",widget=None):
+def _create_iconized_button(icon_file,text="",scale=1):
     button = QPushButton(text)
     button.setIcon( QIcon(icon_file) )
-    button.setIconSize(button.sizeHint())
+    button.setIconSize(scale*button.sizeHint())
     return button
 
 ############################################################################### Image to NDTiff helper
@@ -311,6 +311,8 @@ class CameraWidget(QWidget):
         
         self.start_acquiring.connect(self.cam_handler.acquire_frames)
         
+        self.in_exp_time.editingFinished.connect( self.exposure_time_changed )
+        
         self.cam_handler.frame_ready.connect(self.img2qimg.got_frame)
         self.cam_handler.frame_ready.connect(self.img2tiff.got_frame)
         
@@ -408,8 +410,22 @@ class CameraWidget(QWidget):
         self.live_button = _create_iconized_button(icon_prov.video_camera)
         layout.addWidget(self.live_button)
         
-        save_widget = QWidget()
-        save_layout = QFormLayout()
+        layout.addWidget(self.create_saving_panel())
+        
+        layout.addWidget(self.create_configuration_panel())
+        
+        widget.setLayout(layout)
+        return widget
+    
+    def create_saving_panel(self):
+        
+        icon_prov = IconProvider()
+        
+        widget = QWidget()
+        layout = QHBoxLayout()
+        
+        input_widget = QWidget()
+        input_layout = QFormLayout()
         
         self.filename = QLineEdit()
         
@@ -418,17 +434,48 @@ class CameraWidget(QWidget):
         self.num_frames.setSingleStep(10)
         self.num_frames.setValue(0)
         
-        save_layout.addRow('Save to:',self.filename)
-        save_layout.addRow('Num. Frames:',self.num_frames)
-        
-        save_widget.setLayout(save_layout)
-        layout.addWidget(save_widget)
-        
         self.save_button = _create_iconized_button(icon_prov.floppy_disk_arrow_in)
+        
+        input_layout.addRow('Save to:',self.filename)
+        input_layout.addRow('Num. Frames:',self.num_frames)
+        
+        input_widget.setLayout(input_layout)
+        
+        layout.addWidget(input_widget)
         layout.addWidget(self.save_button)
         
-        self.test_ROI_button = QPushButton('Test ROI')
-        layout.addWidget(self.test_ROI_button)
+        widget.setLayout(layout)
+        return widget
+    
+    def create_configuration_panel(self):
+        
+        # icon_prov = IconProvider()
+        
+        widget = QWidget()
+        layout = QHBoxLayout()
+        
+        parameters_widget = QWidget()
+        parameters_layout = QFormLayout()
+        
+        # Exposure time
+        exp_values    = self.cam_handler.get_exp_time_range()
+        exp_cur_value = self.cam_handler.get_exp_time()
+        if isinstance(exp_values, tuple):
+            self.in_exp_time = QSpinBox()
+            self.in_exp_time.setRange( exp_values[0], exp_values[1] )
+            self.in_exp_time.setSingleStep(10)
+            self.in_exp_time.setValue( int(exp_cur_value) )
+        elif isinstance(exp_values, list):
+            # ToDo: Further test
+            self.in_exp_time = QComboBox(exp_values)
+        
+        parameters_layout.addRow('Exposure time (ms):',self.in_exp_time)
+        parameters_layout.addRow('Binning:',QLabel('Unsupported'))
+        parameters_layout.addRow('Gain (dB):',QLabel('Unsupported'))
+        
+        parameters_widget.setLayout(parameters_layout)
+        
+        layout.addWidget(parameters_widget)
         
         widget.setLayout(layout)
         return widget
@@ -474,6 +521,10 @@ class CameraWidget(QWidget):
         self.num_frames.setEnabled(True)
         self.save_button.setEnabled(True)
         
+    @pyqtSlot()
+    def exposure_time_changed(self):
+        self.cam_handler.set_exp_time( int(self.in_exp_time.value()) )
+    
     @pyqtSlot()
     def update_image(self):
         self.display_img_size.setText( f'{self.img2qimg.w}x{self.img2qimg.h} pixeles' )
