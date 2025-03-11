@@ -1,0 +1,31 @@
+# Copy the spinnaker_python-4...whl file into the sdk_installer folder
+name: CryoSResCLEMcontrol_env
+channels:
+  - nodefaults
+  - conda-forge
+dependencies:
+  - h5py
+  - matplotlib
+  - numba
+  - numpy=1
+  - pyqt
+  - pyserial
+  - python=3.10
+  - scikit-image
+  - scikit-learn
+  - scipy
+  - spyder
+  - spyder-kernels
+  - git
+  - pip
+  
+  - pip:
+      - hidapi
+      - microfpga
+      - microscope
+      - qtmodern
+      - ndstorage
+      - pycromanager # To be DEPRECATED
+      - sdk_installers/spinnaker_python-4.0.0.116-cp310-cp310-win_amd64.whl
+
+
