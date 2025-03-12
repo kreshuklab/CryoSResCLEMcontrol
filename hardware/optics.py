@@ -1,6 +1,121 @@
-from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
 import numpy as np
 
+############################################################################### LaserDeviceBase
+
+class LaserDeviceBase(QObject):
+    
+    ################################################################### Signals
+    
+    failed = pyqtSignal(str)
+    done   = pyqtSignal(str)
+    
+    ############################################################# CTOR and DTOR
+    
+    def __init__(self,unique_id,vendor,model,n_devs=1,parent=None):
+        super().__init__(parent)
+        
+        self.uid    = str(unique_id)
+        self.vendor = vendor
+        self.model  = model
+        self.power  = 0
+        self.status = False
+        self.n_devs = max(n_devs,1)
+    
+    ####################################################### Log and Description
+    
+    def _get_full_id(self,dev_id):
+        return f'{self.uid}.{self.vendor}.{self.model}.{dev_id}'
+    
+    def log_message(self,dev_id:int,message:str,prefix=''):
+        print(f'{prefix}[{self._get_full_id(dev_id)}]: {message}')
+
+    def get_descriptor(self):
+        descriptor = {}
+        descriptor[f'{self.uid}.vendor'] = self.vendor
+        descriptor[f'{self.uid}.model' ] = self.model
+        descriptor[f'{self.uid}.power' ] = self.power
+        descriptor[f'{self.uid}.status'] = self.status
+        descriptor[f'{self.uid}.n_devs'] = self.n_devs
+    
+    ############################################################ Power Fraction
+    
+    @pyqtSlot(int,float)
+    def set_power_fraction(self,dev_id:int,fraction:float):
+        self.power = fraction
+        self._write_power_fraction(dev_id,self.power)
+    
+    def get_power_fraction(self,dev_id:int):
+        power = self._read_power_fraction(dev_id)
+        self.power = power
+        return self.power
+    
+    # To Be Implemented by Child
+    def _write_power_fraction(self,dev_id:int,fraction:float):
+        thread_id = int(QThread.currentThreadId())
+        self.log_message(dev_id,f'Setting power to {fraction:.3f}',prefix=f'[DUMMY {thread_id}] ')
+    
+    # To Be Implemented by Child
+    def _read_power_fraction(self,dev_id:int):
+        thread_id = int(QThread.currentThreadId())
+        self.log_message(dev_id,f'Getting power as {self.power:.3f}',prefix=f'[DUMMY {thread_id}] ')
+        return self.power
+    
+    ############################################################## Power Status
+    
+    @pyqtSlot(int,bool)
+    def set_power_status(self,dev_id:int,status:bool):
+        self.status = status
+        self._write_power_status(dev_id,self.status)
+    
+    def get_power_status(self,dev_id:int):
+        status = self._read_power_status(dev_id)
+        self.status = status
+        return self.status
+        
+    # To Be Implemented by Child
+    def _write_power_status(self,dev_id:int,status:bool):
+        on_or_off = 'on' if status else 'off'
+        thread_id = int(QThread.currentThreadId())
+        self.log_message(dev_id,f'Setting power {on_or_off}',prefix=f'[DUMMY {thread_id}] ')
+     
+    # To Be Implemented by Child
+    def _read_power_status(self,dev_id:int):
+        on_or_off = 'on' if self.status else 'off'
+        thread_id = int(QThread.currentThreadId())
+        self.log_message(dev_id,f'Getting power {on_or_off}',prefix=f'[DUMMY {thread_id}] ')
+        return self.status
+
+############################################################################### Toptica iBeam
+
+from microscope.lights.toptica import TopticaiBeam
+
+class TopticaLaser(QThread):
+    laser_done = pyqtSignal()
+    
+    def __init__(self):
+        super().__init__()
+        self.iBeam = TopticaiBeam('COM3')
+        
+    def __del__(self):
+        self.iBeam._conn.command(b"channel 1 power 0.0")
+        self.iBeam.disable()
+    
+    @pyqtSlot(int,float)
+    def set_pwm_percentage(self,device,pwm_value):
+        self.iBeam._conn.command(b"channel 1 power %f" % (2*pwm_value))
+        self.laser_done.emit()
+    
+    @pyqtSlot(int)
+    def turn_on(self,device):
+        self.iBeam.enable()
+        self.laser_done.emit()
+        
+    @pyqtSlot(int)
+    def turn_off(self,device):
+        self.iBeam.disable()
+        self.laser_done.emit()
+        
 ############################################################################### Dummy
 
 class DummyLaser(QThread):

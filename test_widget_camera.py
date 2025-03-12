@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
         main_widget = QWidget()
         layout = QVBoxLayout()
         
-        hcam_widget = CameraWidget(self.hcam,"Main Camera (Hamamatsu)")
+        hcam_widget = CameraWidget(self.hcam,"Main")
         
         layout.addWidget(hcam_widget)
         main_widget.setLayout(layout)
@@ -46,7 +46,7 @@ class MainWindow(QMainWindow):
         self.hcam.stop_acquisition()
         event.accept()
         
-#create_dark_iconoir()
+create_dark_iconoir()
 
 # icon_prov = IconProvider()
 # icon_prov.set_dark_mode()

@@ -1,7 +1,7 @@
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
-from PyQt5.QtCore import QRect
-import numpy as np
+from PyQt5.QtCore import QRect, QTimer
 from datetime import datetime
+import numpy as np
 
 ############################################################################### CameraDevice
 
@@ -170,117 +170,198 @@ class _CameraDevice(QObject):
 
 ############################################################################### HamamatsuCamera
 
-from .dcam import Dcamapi, Dcam
-from .dcamapi4 import DCAM_IDPROP,DCAMPROP,DCAM_IDSTR,DCAM_PIXELTYPE
+try:
+    from .dcam import Dcamapi, Dcam
+    from .dcamapi4 import DCAM_IDPROP,DCAMPROP,DCAM_IDSTR,DCAM_PIXELTYPE
+    _should_use_dcam = True
+except:
+    _should_use_dcam = False
+    print('DCAM libraries not found, using a dummy camera')
 
-class HamamatsuCamera(_CameraDevice):
-    
-    ############################################################# CTOR and DTOR
-    
-    def __init__(self,name,camera_index=0,exposure_time_ms=100):
+if _should_use_dcam:
+    class HamamatsuCamera(_CameraDevice):
         
-        assert Dcamapi.init(), "Cannot connect to DCAM (Hamamatsu) driver."
-        self.camera = Dcam(camera_index)
-        assert self.camera.dev_open(), f"Failed to open camera {camera_index}."
+        ############################################################# CTOR and DTOR
         
-        vendor = self.camera.dev_getstring(DCAM_IDSTR.VENDOR)
-        model  = self.camera.dev_getstring(DCAM_IDSTR.MODEL)
-        roi_levels = 2
-        
-        super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
-        
-        self.frame_timeout_ms = 1000
-        self.set_cooler_on()
-        self.set_uint16()
-        
-    def __del__(self):
-        self.camera.dev_close()
-        Dcamapi.uninit()
-    
-    ########################################################## Extra Properties
-    
-    def set_uint16(self):
-        self.camera.prop_setvalue(DCAM_IDPROP.IMAGE_PIXELTYPE,DCAM_PIXELTYPE.MONO16)
-    
-    def set_cooler_on(self):
-        self.camera.prop_setvalue(DCAM_IDPROP.SENSORCOOLER,DCAMPROP.MODE.ON)
-    
-    def set_cooler_off(self):
-        self.camera.prop_setvalue(DCAM_IDPROP.SENSORCOOLER,DCAMPROP.MODE.OFF)
-    
-    def set_cooler(self,turn_on:bool):
-        if turn_on:
+        def __init__(self,name,camera_index=0,exposure_time_ms=100):
+            
+            assert Dcamapi.init(), "Cannot connect to DCAM (Hamamatsu) driver."
+            self.camera = Dcam(camera_index)
+            assert self.camera.dev_open(), f"Failed to open camera {camera_index}."
+            
+            vendor = self.camera.dev_getstring(DCAM_IDSTR.VENDOR)
+            model  = self.camera.dev_getstring(DCAM_IDSTR.MODEL)
+            roi_levels = 2
+            
+            super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
+            
+            self.frame_timeout_ms = 1000
             self.set_cooler_on()
-        else:
-            self.set_cooler_off()
-    
-    def get_cooler(self):
-        return True if self.camera.prop_getvalue(DCAM_IDPROP.SENSORCOOLER) == DCAMPROP.MODE.ON else False
-    
-    ############################################### Implement common properties
-    
-    def _get_full_chip_size(self):
-        w = self.camera.prop_getvalue(DCAM_IDPROP.IMAGE_WIDTH)
-        h = self.camera.prop_getvalue(DCAM_IDPROP.IMAGE_HEIGHT)
-        return QRect(0,0,int(w),int(h))
-    
-    def set_full_roi(self):
-        self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYMODE,DCAMPROP.MODE.OFF)
-        return True
+            self.set_uint16()
+            
+        def __del__(self):
+            self.camera.dev_close()
+            Dcamapi.uninit()
         
-    def set_roi(self,roi:QRect):
-        x = float(roi.x())
-        y = float(roi.y())
-        w = float(roi.width())
-        h = float(roi.height())
-        self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYHPOS, x)
-        self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYVPOS, y)
-        self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYHSIZE,w)
-        self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYVSIZE,h)
-        self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYMODE,DCAMPROP.MODE.ON)
-        return True
+        ########################################################## Extra Properties
         
-    def write_exp_time(self):
-        exp_time_sec = float(self.exp_time_ms)/1000
-        self.camera.prop_setgetvalue(DCAM_IDPROP.EXPOSURETIME,exp_time_sec)
-    
-    def read_exp_time(self):
-        return self.camera.prop_getvalue(DCAM_IDPROP.EXPOSURETIME)*1000
-    
-    ##################################################### Acquisition functions
-    
-    def _do_snap_frame(self):
-        assert self.camera.buf_alloc(1), "Failed to create buffer for camera"
+        def set_uint16(self):
+            self.camera.prop_setvalue(DCAM_IDPROP.IMAGE_PIXELTYPE,DCAM_PIXELTYPE.MONO16)
         
-        if self.camera.cap_snapshot():
-            if self.camera.wait_capevent_frameready(self.frame_timeout_ms):
-                self.frame_buffer = self.camera.buf_getlastframedata()
-                self.frame_count  = 0
-                self.timestamp    = datetime.now()
-                self.frame_ready.emit()
+        def set_cooler_on(self):
+            self.camera.prop_setvalue(DCAM_IDPROP.SENSORCOOLER,DCAMPROP.MODE.ON)
         
-        self.camera.buf_release()
+        def set_cooler_off(self):
+            self.camera.prop_setvalue(DCAM_IDPROP.SENSORCOOLER,DCAMPROP.MODE.OFF)
         
-    @pyqtSlot()
-    def _do_acquire_frames(self,max_frames):
-        print('Requested Exposure time: ', self.get_exp_time())
-        print('Is cooling: ', self.get_cooler())
+        def set_cooler(self,turn_on:bool):
+            if turn_on:
+                self.set_cooler_on()
+            else:
+                self.set_cooler_off()
         
-        assert self.camera.buf_alloc(3), "Failed to create buffer for camera"
+        def get_cooler(self):
+            return True if self.camera.prop_getvalue(DCAM_IDPROP.SENSORCOOLER) == DCAMPROP.MODE.ON else False
         
-        self.frame_count = 0
-        self.done_acquiring = False
-        if self.camera.cap_start():
-            while self.do_image and not self.done_acquiring:
+        ############################################### Implement common properties
+        
+        def _get_full_chip_size(self):
+            w = self.camera.prop_getvalue(DCAM_IDPROP.IMAGE_WIDTH)
+            h = self.camera.prop_getvalue(DCAM_IDPROP.IMAGE_HEIGHT)
+            return QRect(0,0,int(w),int(h))
+        
+        def set_full_roi(self):
+            self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYMODE,DCAMPROP.MODE.OFF)
+            return True
+            
+        def set_roi(self,roi:QRect):
+            x = float(roi.x())
+            y = float(roi.y())
+            w = float(roi.width())
+            h = float(roi.height())
+            self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYHPOS, x)
+            self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYVPOS, y)
+            self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYHSIZE,w)
+            self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYVSIZE,h)
+            self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYMODE,DCAMPROP.MODE.ON)
+            return True
+            
+        def write_exp_time(self):
+            exp_time_sec = float(self.exp_time_ms)/1000
+            self.camera.prop_setgetvalue(DCAM_IDPROP.EXPOSURETIME,exp_time_sec)
+        
+        def read_exp_time(self):
+            return self.camera.prop_getvalue(DCAM_IDPROP.EXPOSURETIME)*1000
+        
+        ##################################################### Acquisition functions
+        
+        def _do_snap_frame(self):
+            assert self.camera.buf_alloc(1), "Failed to create buffer for camera"
+            
+            if self.camera.cap_snapshot():
                 if self.camera.wait_capevent_frameready(self.frame_timeout_ms):
                     self.frame_buffer = self.camera.buf_getlastframedata()
+                    self.frame_count  = 0
                     self.timestamp    = datetime.now()
-                    self.frame_count += 1
                     self.frame_ready.emit()
+            
+            self.camera.buf_release()
+            
+        @pyqtSlot()
+        def _do_acquire_frames(self,max_frames):
+            print('Requested Exposure time: ', self.get_exp_time())
+            print('Is cooling: ', self.get_cooler())
+            
+            assert self.camera.buf_alloc(3), "Failed to create buffer for camera"
+            
+            self.frame_count = 0
+            self.done_acquiring = False
+            if self.camera.cap_start():
+                while self.do_image and not self.done_acquiring:
+                    if self.camera.wait_capevent_frameready(self.frame_timeout_ms):
+                        self.frame_buffer = self.camera.buf_getlastframedata()
+                        self.timestamp    = datetime.now()
+                        self.frame_count += 1
+                        self.frame_ready.emit()
+                    self.done_acquiring = (self.frame_count>=max_frames) and (max_frames>0)
+                self.do_image = False
+                self.done_acquiring = True
+            self.camera.cap_stop()
+            self.camera.buf_release()
+
+else:
+    from tifffile import imread as _imread
+    from time import sleep as _sleep
+    
+    class HamamatsuCamera(_CameraDevice):
+        
+        ############################################################# CTOR and DTOR
+        
+        def __init__(self,name,camera_index=0,exposure_time_ms=100):
+            
+            self.raw_image = _imread('resources/SWTestbild_upscaled.tif')
+            
+            vendor = 'TestCamera'
+            model  = 'Telefunken_Test_Card_T05'
+            roi_levels = 2
+            
+            super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
+            self._internal_frame = np.zeros((0,0))
+                
+        def __del__(self):
+            pass
+        
+        ############################################### Implement common properties
+        
+        def _get_full_chip_size(self):
+            h,w = self.raw_image.shape
+            return QRect(0,0,int(w),int(h))
+        
+        def set_full_roi(self):
+            return True
+            
+        def set_roi(self,roi:QRect):
+            return True
+            
+        def write_exp_time(self):
+            pass
+        
+        def read_exp_time(self):
+            return self.exp_time_ms
+        
+        ##################################################### Acquisition functions
+        
+        def _gen_frame(self):
+            self._buffer_f32  = np.float32(self.raw_image)
+            self._buffer_f32 += np.random.normal(0,25*(300-self.exp_time_ms),self.raw_image.shape)
+            self._buffer_u16  = np.uint16( self._buffer_f32.clip(0,65535) )
+            return self._buffer_u16
+            
+        def _do_snap_frame(self):
+            self.frame_buffer = self._gen_frame()
+            self.frame_count  = 0
+            self.timestamp    = datetime.now()
+            self.frame_ready.emit()
+            
+        @pyqtSlot()
+        def _do_acquire_frames(self,max_frames):
+            
+            self.frame_count = 0
+            self.done_acquiring = False
+            
+            while self.do_image and not self.done_acquiring:
+                t0 = datetime.now()
+                self.frame_buffer = self._gen_frame()
+                self.timestamp    = datetime.now()
+                self.frame_count += 1
+                self.frame_ready.emit()
+                t1 = datetime.now()
+                delta = t1 - t0
+                delta = delta.total_seconds()*1000
+                if delta < self.exp_time_ms:
+                    _sleep( (self.exp_time_ms-delta)/1000 )
                 self.done_acquiring = (self.frame_count>=max_frames) and (max_frames>0)
             self.do_image = False
             self.done_acquiring = True
-        self.camera.cap_stop()
-        self.camera.buf_release()
-
+            
 # %%

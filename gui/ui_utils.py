@@ -1,6 +1,5 @@
-# from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon
 from glob import glob
-
 
 class _IconProviderMeta(type):
     _instances = {}
@@ -26,3 +25,7 @@ class IconProvider(metaclass=_IconProviderMeta):
             attribute_name =  file[10:-9]
             attribute_name = attribute_name.replace('-','_')
             setattr(self,attribute_name,file)
+    
+    def get_icon(self,icon_filename):
+        return QIcon(icon_filename)
+
