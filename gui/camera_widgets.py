@@ -1,23 +1,17 @@
 from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
-from PyQt5.QtCore import QElapsedTimer, QPoint
+from PyQt5.QtCore import QElapsedTimer, QPoint, QRectF, QPointF
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
-from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QOpenGLWidget
+from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QOpenGLWidget, QGraphicsItem
 from PyQt5.QtWidgets import QPushButton, QLabel, QLineEdit, QSpinBox, QComboBox
 from PyQt5.QtWidgets import QSizePolicy, QFrame
-from PyQt5.QtGui import QImage, QPixmap, QIcon, QFont, QPalette, QColor, QTransform, QFontMetrics,QIntValidator
+from PyQt5.QtGui import QImage, QPixmap, QIcon, QFont, QPalette, QColor, QTransform
+from PyQt5.QtGui import QFontMetrics, QIntValidator, QPainter, QPen, QBrush, QColor
 import numpy as np
 from core.utils import FixedSizeNumpyQueue,get_min_max_avg
 from ndstorage import NDTiffDataset
 from gui.ui_utils import IconProvider
+from gui.ui_utils import create_iconized_button,create_int_line_edit,create_combo_box
 from os.path import exists as _exists
-
-############################################################################### Create Button with Icon
-
-def _create_iconized_button(icon_file,text="",scale=1):
-    button = QPushButton(text)
-    button.setIcon( QIcon(icon_file) )
-    button.setIconSize(scale*button.sizeHint())
-    return button
 
 ############################################################################### Image to NDTiff helper
 
@@ -146,6 +140,34 @@ class ImageToQImage(QObject):
 
 ############################################################################### Custom GraphicsScene
 
+class ROIItem(QGraphicsItem):
+    def __init__(self,color_hex,outer_box=128,halo=0,parent=None):
+        super().__init__(parent)
+        
+        self.color = color_hex
+        self.set_box_size(outer_box,halo)
+
+    def set_box_size(self,box_size,halo):
+        self.outer_box = box_size
+        self.inner_box = 0
+        
+        self.outer_half = self.outer_box/2 
+        self.inner_half = 0
+
+    def boundingRect(self):
+        return QRectF(-self.outer_half,-self.outer_half,self.outer_box,self.outer_box)
+    
+    def paint(self, painter: QPainter, option, widget=None):
+        outer_pen = QPen(QColor(self.color),2)
+        outer_pen.setCosmetic(True)
+        
+        painter.setPen(outer_pen)
+        painter.setBrush(QBrush(Qt.NoBrush))
+
+        # Outer square
+        outer_rect = QRectF(-self.outer_half,-self.outer_half,self.outer_box,self.outer_box)
+        painter.drawRect(outer_rect)
+ 
 class CameraScene(QGraphicsScene):
     
     def __init__(self, parent=None):
@@ -156,6 +178,19 @@ class CameraScene(QGraphicsScene):
         self.H = 0
         self.Wh = 0
         self.Hh = 0
+        
+        self.halo_size = 0
+        
+        self.current_roi = ROIItem('#FFD700')
+        self.current_roi.setVisible(False)
+        self.current_roi.setZValue(0)
+        self.addItem(self.current_roi)
+        
+        # self.moving_roi = ROIItem('#FF1493')
+        self.moving_roi = ROIItem('#DB7093')
+        self.moving_roi.setVisible(False)
+        self.moving_roi.setZValue(0)
+        self.addItem(self.moving_roi)
         
     def has_image(self):
         return self.image is not None
@@ -168,19 +203,51 @@ class CameraScene(QGraphicsScene):
             self.image.setZValue(-1)
             self.image.setPos(0,0)
             self.image.setTransformationMode( Qt.TransformationMode.SmoothTransformation )
-            # self.image.setTransformationMode( Qt.TransformationMode.FastTransformation )
             should_fit = True
             
         pixmap = QPixmap.fromImage(qimg)
         self.image.setPixmap(pixmap)
+        self.setSceneRect( self.image.boundingRect())
         self.W = self.sceneRect().width()
         self.H = self.sceneRect().height()
         
         return should_fit
 
+    def show_current_roi(self,x,y,box_size):
+        self.current_roi.set_box_size(box_size,self.halo_size)
+        self.current_roi.setPos(x,y)
+        self.current_roi.setVisible(True)
+    
+    def hide_current_roi(self):
+        self.current_roi.setVisible(False)
+        
+    def config_moving_roi(self,box_size):
+        self.moving_roi.set_box_size(box_size,self.halo_size)
+        self.moving_roi.setPos(0,0)
+        self.moving_roi.setVisible(False)
+    
+    def hide_moving_roi(self):
+        self.moving_roi.setVisible(False)
+        
+    def try_move_moving_roi(self,new_pos:QPointF):
+        x = new_pos.x()
+        y = new_pos.y()
+        
+        in_range = (x > self.moving_roi.outer_half)
+        in_range = (y > self.moving_roi.outer_half) and in_range
+        in_range = (x < self.W-self.moving_roi.outer_half) and in_range
+        in_range = (y < self.H-self.moving_roi.outer_half) and in_range
+        
+        if in_range:
+            self.moving_roi.setVisible(True)
+            self.moving_roi.setPos(x,y)
+        else:
+            self.moving_roi.setVisible(False)
+
 ###############################################################################
 
 class CameraViewer(QGraphicsView):
+    new_position = pyqtSignal(int,int)
     
     def __init__(self, qimg_provider, parent=None, useOpenGL=True, background='black'):
         
@@ -189,6 +256,8 @@ class CameraViewer(QGraphicsView):
         self.do_pan    = False
         self.start_pos = QPoint()
         self._qimg_provider = qimg_provider
+        
+        self.track_roi = False
         
         if useOpenGL:
             self.setViewport( QOpenGLWidget() )
@@ -232,14 +301,21 @@ class CameraViewer(QGraphicsView):
     def mousePressEvent(self,event):
         super().mousePressEvent(event)
         
-        if event.button() == Qt.LeftButton or event.button() == Qt.MiddleButton:
+        if event.button() == Qt.MiddleButton:
             self.do_pan = True
             self.start_pos = event.pos()
+        
+        if event.button() == Qt.LeftButton:
+            if self.track_roi:
+                x = int( self.scene_handler.moving_roi.pos().x() )
+                y = int( self.scene_handler.moving_roi.pos().y() )
+                self.scene_handler.current_roi.setPos(x,y)
+                self.new_position.emit(x,y)
         
     def mouseReleaseEvent(self,event):
         super().mousePressEvent(event)
         
-        if event.button() == Qt.LeftButton or event.button() == Qt.MiddleButton:
+        if event.button() == Qt.MiddleButton:
             self.do_pan = False
     
     def mouseMoveEvent(self,event):
@@ -250,6 +326,11 @@ class CameraViewer(QGraphicsView):
             vBar.setValue(vBar.value() + delta.y())
             hBar.setValue(hBar.value() + delta.x())
             self.start_pos = event.pos()
+            
+        if self.track_roi:
+            scene_pos = self.mapToScene(event.pos())
+            self.scene_handler.try_move_moving_roi(scene_pos)
+            
         super().mouseMoveEvent(event)
         
     @pyqtSlot()
@@ -267,6 +348,22 @@ class CameraViewer(QGraphicsView):
             self.zoom_in()
         else:
             self.zoom_out()
+    
+    def show_current_roi(self,x,y,box_size):
+        self.scene_handler.show_current_roi(x,y,box_size)
+    
+    def hide_current_roi(self):
+        self.scene_handler.hide_current_roi()
+        
+    def enable_roi_tracking(self,x,y,box_size):
+        self.scene_handler.show_current_roi(x,y,box_size)
+        self.scene_handler.config_moving_roi(box_size)
+        self.track_roi = True
+
+    def disable_roi_tracking(self):
+        self.scene_handler.hide_current_roi()
+        self.scene_handler.hide_moving_roi()
+        self.track_roi = False
 
 ############################################################################### Camera Viewer
 
@@ -283,8 +380,6 @@ class CameraWidget(QWidget):
         self.cam_handler = camera_handler
         self.cam_thread  = QThread(self)
         self.cam_handler.moveToThread(self.cam_thread)
-        
-        # self.cam_handler.set_exposure_time(0.1)
         
         self.img2qimg    = ImageToQImage(self.cam_handler)
         self.img2qimg.set_outlier_range(0.002)
@@ -312,8 +407,17 @@ class CameraWidget(QWidget):
         self.save_button.clicked.connect(self.clicked_save)
         
         self.btn_zoom_full.clicked.connect(self.image.fitScale)
-        self.btn_zoom_in.clicked.connect(self.image.zoom_in)
-        self.btn_zoom_out.clicked.connect(self.image.zoom_out)
+        self.btn_zoom_in  .clicked.connect(self.image.zoom_in)
+        self.btn_zoom_out .clicked.connect(self.image.zoom_out)
+        
+        self.roi_button_show.pressed.connect(self.current_roi_show )
+        self.roi_button_show.released.connect(self.current_roi_hide )
+        
+        self.roi_button_in  .clicked.connect(self.clicked_roi_in )
+        self.roi_button_out .clicked.connect(self.clicked_roi_out)
+        self.roi_button_pick.clicked.connect(self.clicked_roi_pick)
+        self.cam_handler.roi_set.connect( self.update_roi_state )
+        self.image.new_position.connect( self.got_new_roi_position )
         
         self.start_acquiring.connect(self.cam_handler.acquire_frames)
         
@@ -342,9 +446,9 @@ class CameraWidget(QWidget):
         stat_widget = QWidget()
         stat_layout = QHBoxLayout()
         
-        self.btn_zoom_full = _create_iconized_button(icon_prov.expand)
-        self.btn_zoom_in   = _create_iconized_button(icon_prov.zoom_in)
-        self.btn_zoom_out  = _create_iconized_button(icon_prov.zoom_out)
+        self.btn_zoom_full = create_iconized_button(icon_prov.expand)
+        self.btn_zoom_in   = create_iconized_button(icon_prov.zoom_in)
+        self.btn_zoom_out  = create_iconized_button(icon_prov.zoom_out)
         
         stat_layout.addWidget(self.btn_zoom_full)
         stat_layout.addWidget(self.btn_zoom_in  )
@@ -414,8 +518,8 @@ class CameraWidget(QWidget):
         buttons_layout = QHBoxLayout()
         buttons_layout.setContentsMargins(0,0,0,0)
         
-        self.snap_button = _create_iconized_button(icon_prov.camera)
-        self.live_button = _create_iconized_button(icon_prov.video_camera)
+        self.snap_button = create_iconized_button(icon_prov.camera)
+        self.live_button = create_iconized_button(icon_prov.video_camera)
         buttons_layout.addStretch(0)
         buttons_layout.addWidget(self.snap_button)
         buttons_layout.addWidget(self.live_button)
@@ -446,7 +550,7 @@ class CameraWidget(QWidget):
         self.num_frames.setSingleStep(10)
         self.num_frames.setValue(0)
         
-        self.save_button = _create_iconized_button(icon_prov.floppy_disk_arrow_in)
+        self.save_button = create_iconized_button(icon_prov.floppy_disk_arrow_in)
         
         input_layout.addRow('Save to:',self.filename)
         input_layout.addRow('Num. Frames:',self.num_frames)
@@ -466,50 +570,44 @@ class CameraWidget(QWidget):
         widget = QWidget()
         layout = QVBoxLayout()
         
-        ########
+        ######## ROI Buttons
         
         roi_button_widget = QWidget()
         roi_button_layout = QHBoxLayout()
         roi_button_layout.setContentsMargins(0,0,0,0)
-        self.roi_button_show = _create_iconized_button(icon_prov.iris_scan)
-        self.roi_button_pick = _create_iconized_button(icon_prov.border_out)
-        self.roi_button_in   = _create_iconized_button(icon_prov.scale_frame_reduce)
-        self.roi_button_out  = _create_iconized_button(icon_prov.scale_frame_enlarge)
+        self.roi_button_show = create_iconized_button(icon_prov.iris_scan)
+        self.roi_button_pick = create_iconized_button(icon_prov.border_out)
+        self.roi_button_in   = create_iconized_button(icon_prov.scale_frame_reduce)
+        self.roi_button_out  = create_iconized_button(icon_prov.scale_frame_enlarge)
         roi_button_layout.addWidget(self.roi_button_show)
         roi_button_layout.addWidget(self.roi_button_pick)
         roi_button_layout.addWidget(self.roi_button_in  )
         roi_button_layout.addWidget(self.roi_button_out )
         roi_button_widget.setLayout(roi_button_layout)
         
-        ########
+        ######## ROI Fields
         
-        int_validator = QIntValidator(0,9999)
         roi_config_widget = QWidget()
         roi_config_layout = QHBoxLayout()
         roi_config_layout.setContentsMargins(0,0,0,0)
-        self.roi_config_pos_x = QLineEdit()
-        self.roi_config_pos_y = QLineEdit()
+        self.roi_config_label = QLabel('Next ROI X/Y:')
+        self.roi_config_pos_x = create_int_line_edit(0,4000,'X')
+        self.roi_config_pos_y = create_int_line_edit(0,4000,'Y')
         self.roi_config_size  = QSpinBox()
-        self.roi_config_size.setRange(0,4000)
+        self.roi_config_size.setRange(0,4000) # ToDo: validate multiple of 8
         self.roi_config_size.setSingleStep(4)
         self.roi_config_size.setValue(512)
-        font_metrics = QFontMetrics(self.roi_config_pos_x.font())
-        self.roi_config_pos_x.setPlaceholderText('X')
-        self.roi_config_pos_y.setPlaceholderText('Y')
-        self.roi_config_pos_x.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.roi_config_pos_y.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.roi_config_pos_x.setValidator(int_validator)
-        self.roi_config_pos_y.setValidator(int_validator)
-        self.roi_config_pos_x.setMinimumWidth( 5*font_metrics.horizontalAdvance('0') )
-        self.roi_config_pos_y.setMinimumWidth( 5*font_metrics.horizontalAdvance('0') )
-        roi_config_layout.addWidget(QLabel('ROI X/Y:'))
+        roi_config_layout.addWidget(self.roi_config_label)
         roi_config_layout.addWidget(self.roi_config_pos_x)
         roi_config_layout.addWidget(self.roi_config_pos_y)
         roi_config_layout.addWidget(QLabel('Size:'))
         roi_config_layout.addWidget(self.roi_config_size )
         roi_config_widget.setLayout(roi_config_layout)
         
-        ########
+        ######## ROI update Fields and Buttons
+        self.update_roi_state()
+        
+        ######## Parameters
         
         parameters_widget = QWidget()
         parameters_layout = QFormLayout()
@@ -522,15 +620,27 @@ class CameraWidget(QWidget):
             self.in_exp_time = QSpinBox()
             self.in_exp_time.setRange( exp_values[0], exp_values[1] )
             self.in_exp_time.setSingleStep(10)
+            self.in_exp_time.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
             self.in_exp_time.setValue( int(exp_cur_value) )
         elif isinstance(exp_values, list):
             # ToDo: Further test
             self.in_exp_time = QComboBox(exp_values)
         
         parameters_layout.addRow('Exposure time (ms):',self.in_exp_time)
-        parameters_layout.addRow('Binning:',QLabel('Unsupported'))
-        parameters_layout.addRow('Gain (dB):',QLabel('Unsupported'))
         
+        if hasattr(self.cam_handler,'binning'):
+            parameters_layout.addRow('Binning:',QLabel('Unsupported'))
+        
+        if hasattr(self.cam_handler,'gain'):
+            parameters_layout.addRow('Gain (dB):',QLabel('Unsupported'))
+        
+        if hasattr(self.cam_handler,'cooler'):
+            entries = self.cam_handler.get_cooler_range()
+            value   = self.cam_handler.get_cooler()
+            self.cooler_state = create_combo_box(entries,value)
+            parameters_layout.addRow('Cooler state:',self.cooler_state)
+            self.cooler_state.setEnabled(False)
+
         parameters_widget.setLayout(parameters_layout)
         
         ########
@@ -601,6 +711,116 @@ class CameraWidget(QWidget):
         else:
             self.display_fps.setText('-')
     
+    @pyqtSlot()
+    def update_roi_state(self):
+        cur_level = self.cam_handler.current_roi
+        max_level = self.cam_handler.roi_levels
+        
+        if cur_level == 0:
+            self._set_roi_state_first()
+        elif cur_level == (max_level-1):
+            self._set_roi_state_last()
+        else:
+            self._set_roi_state_middle()
+            
+        if cur_level < (max_level-1):
+            self._set_roi_next_values()
+        else:
+            self._set_roi_no_values()
+        
+    def _set_roi_state_first(self):
+        self.roi_button_show.setEnabled(True)
+        self.roi_button_pick.setEnabled(True)
+        self.roi_button_in  .setEnabled(True)
+        self.roi_button_out .setEnabled(False)
+    
+    def _set_roi_state_last(self):
+        self.roi_button_show.setEnabled(False)
+        self.roi_button_pick.setEnabled(False)
+        self.roi_button_in  .setEnabled(False)
+        self.roi_button_out .setEnabled(True)
+    
+    def _set_roi_state_middle(self):
+        self.roi_button_show.setEnabled(True)
+        self.roi_button_pick.setEnabled(True)
+        self.roi_button_in  .setEnabled(True)
+        self.roi_button_out .setEnabled(True)
+        
+    def _set_roi_next_values(self):
+        curr_level = self.cam_handler.current_roi
+        next_level = curr_level + 1
+        self.roi_config_label.setText(f'Current ROI: {curr_level}. Next ROI X/Y:')
+        self.roi_config_pos_x.setEnabled(True)
+        self.roi_config_pos_y.setEnabled(True)
+        self.roi_config_size.setEnabled(True)
+        x = self.cam_handler.roi_list[next_level]['rect'].x()
+        y = self.cam_handler.roi_list[next_level]['rect'].y()
+        w = self.cam_handler.roi_list[next_level]['rect'].width()
+        h = self.cam_handler.roi_list[next_level]['rect'].height()
+        assert w==h, f'Badly defined ROI ({x,y,w,h}).'
+        self.roi_config_pos_x.setText(str(x+w//2))
+        self.roi_config_pos_y.setText(str(y+h//2))
+        self.roi_config_size.setValue(w)
+        self.image.scene_handler.halo_size = self.cam_handler.roi_list[next_level]['halo']
+        
+    def _set_roi_no_values(self):
+        curr_level = self.cam_handler.current_roi
+        self.roi_config_pos_x.setEnabled(False)
+        self.roi_config_pos_y.setEnabled(False)
+        self.roi_config_size.setEnabled(False)
+        self.roi_config_pos_x.setText('')
+        self.roi_config_pos_y.setText('')
+        self.roi_config_size.setValue(0)
+        self.image.scene_handler.halo_size = 0
+        self.roi_config_label.setText(f'Current ROI: {curr_level}. Next ROI unavailable.')
+    
+    def _get_roi_entries(self):
+        x = 0
+        y = 0
+        x_text = self.roi_config_pos_x.text()
+        if len(x_text) > 0:
+            x = int(x_text)
+        y_text = self.roi_config_pos_y.text()
+        if len(y_text) > 0:
+            y = int(y_text)
+        N = self.roi_config_size.value()
+        return x,y,N
+    
+    @pyqtSlot()
+    def clicked_roi_in(self):
+        x,y,N = self._get_roi_entries()
+        self.cam_handler.next_roi(x,y,N)
+    
+    @pyqtSlot()
+    def clicked_roi_out(self):
+        x,y,N = self._get_roi_entries()
+        self.cam_handler.previous_roi(x,y,N)
+    
+    @pyqtSlot()
+    def current_roi_show(self):
+        x,y,N = self._get_roi_entries()
+        self.image.show_current_roi(x,y,N)
+        
+    @pyqtSlot()
+    def current_roi_hide(self):
+        self.image.hide_current_roi()
+        
+    @pyqtSlot()
+    def clicked_roi_pick(self):
+        icon_prov = IconProvider()
+        if self.image.track_roi:
+            self.image.disable_roi_tracking()
+            self.roi_button_pick.setIcon(QIcon(icon_prov.border_out))
+        else:
+            x,y,N = self._get_roi_entries()
+            self.image.enable_roi_tracking(x,y,N)
+            self.roi_button_pick.setIcon(QIcon(icon_prov.xmark))
+            
+    @pyqtSlot(int,int)
+    def got_new_roi_position(self,x,y):
+        self.roi_config_pos_x.setText( str(x) )
+        self.roi_config_pos_y.setText( str(y) )
+        
     def __del__(self):
         
         print('Waiting for Img2Tiff')

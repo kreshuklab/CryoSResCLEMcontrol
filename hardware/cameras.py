@@ -6,15 +6,16 @@ import numpy as np
 ############################################################################### CameraDevice
 
 class _CameraDevice(QObject):
-    _acquire    = pyqtSignal()
-    _snap       = pyqtSignal()
-    _stopped    = pyqtSignal()
+    _acquire = pyqtSignal()
+    _snap    = pyqtSignal()
+    _stopped = pyqtSignal()
+    roi_set  = pyqtSignal()
     
     frame_ready = pyqtSignal()
     acquisition_started  = pyqtSignal()
     acquisition_finished = pyqtSignal()
     
-    def __init__(self,unique_id,vendor,model,roi_levels,pix_size_nm,exp_time_ms,gain=None,binning=None):
+    def __init__(self,unique_id,vendor,model,roi_levels,pix_size_nm,exp_time_ms):
         super().__init__()
         
         self.frame_buffer = np.zeros((0,0))
@@ -28,18 +29,15 @@ class _CameraDevice(QObject):
         self.pix_size_nm = pix_size_nm
         
         self.is_busy = False
-        self.is_acquiring   = False
+        self.do_image = False
         self.done_acquiring = False
         
         self.set_exp_time(exp_time_ms)
-        if gain is not None:
-            self.set_gain(gain)
-        if binning is not None:
-            self.set_binning(binning)
         self.init_roi_list()
         self.set_roi_by_index(0)
         
         self._update_configuration_function = None
+        self._update_configuration_argument = None
         
         self._stopped.connect( self._update_configuration )
         self._acquire.connect( self.acquire_frames )
@@ -48,9 +46,15 @@ class _CameraDevice(QObject):
     
     @pyqtSlot()
     def _update_configuration(self):
+        print('Updating')
         if self._update_configuration_function is not None:
-            self._update_configuration_function()
+            if self._update_configuration_argument is None:
+                self._update_configuration_function()
+            else:
+                self._update_configuration_function(*self._update_configuration_argument)
             self._update_configuration_function = None
+            self._update_configuration_argument = None
+            print(self._update_configuration_function,self._update_configuration_argument)
             self._acquire.emit()
         
     ############################################################# Exposure Time
@@ -60,8 +64,9 @@ class _CameraDevice(QObject):
     
     def set_exp_time(self,exp_time_ms):
         self.exp_time_ms = exp_time_ms
-        if self.is_acquiring:
-            self._update_configuration_function = self.write_exp_time()
+        if self.do_image:
+            self._update_configuration_function = self.write_exp_time
+            self._update_configuration_argument = None
             self.stop_acquisition()
         else:
             self.write_exp_time()
@@ -80,40 +85,62 @@ class _CameraDevice(QObject):
     def write_exp_time(self): # To Be Implemented by Child
         print(f'write_exp_time not implemented ({self.uid}: {self.vendor} - {self.model})')
     
-    ###################################################################### Gain
-    
-    def get_gain_range(self): # To Be Implemented by Child
-        return (0,0)
-    
-    def set_gain(self,gain):
-        print(f'set_gain not implemented ({self.uid}: {self.vendor} - {self.model})')
-
-    ################################################################### Binning
-    
-    def get_binning_list(self): # To Be Implemented by Child
-        return (1,)
-    
-    def set_binning(self,binning):
-        print(f'set_binning not implemented ({self.uid}: {self.vendor} - {self.model})')
-    
     ####################################################################### ROI
     
     def init_roi_list(self):
         self.roi_list = []
         self.roi_list.append(self._get_full_chip_size())
-        
+        for roi_index in range(1,self.roi_levels):
+            entry = self._get_default_roi_level(roi_index)
+            if entry is not None:
+                self.roi_list.append(entry)
+                
+    def next_roi(self,center_x,center_y,box_size):
+        next_roi = self.current_roi + 1
+        if next_roi < self.roi_levels:
+            self.config_roi(next_roi,center_x,center_y,box_size)
+            if self.do_image:
+                self._update_configuration_function = self.set_roi_by_index
+                self._update_configuration_argument = (next_roi,)
+                self.stop_acquisition()
+            else:
+                self.set_roi_by_index(next_roi)
+    
+    def previous_roi(self,center_x,center_y,box_size):
+        previous_roi = self.current_roi - 1
+        if previous_roi >= 0:
+            self.config_roi(previous_roi,center_x,center_y,box_size)
+            if self.do_image:
+                self._update_configuration_function = self.set_roi_by_index
+                self._update_configuration_argument = (previous_roi,)
+                self.stop_acquisition()
+            else:
+                self.set_roi_by_index(previous_roi)
+    
+    def config_roi(self,roi_index,center_x,center_y,box_size):
+        if (roi_index < len(self.roi_list)) and (roi_index>0):
+            x = center_x - box_size//2
+            y = center_y - box_size//2
+            self.roi_list[roi_index]['rect'].setRect(x,y,box_size,box_size)
+            print(self.roi_list)
+    
     def set_roi_by_index(self,roi_index):
+        print('set_roi_by_index',roi_index)
         if roi_index < len(self.roi_list):
-            if self.set_roi( self.roi_list[roi_index] ):
+            if roi_index == 0:
+                self.set_full_roi()
+                self.current_roi = roi_index
+            elif self.set_roi( self.roi_list[roi_index]['rect'] ):
                 self.current_roi = roi_index
             else:
-                x = self.roi_list[roi_index].x()
-                y = self.roi_list[roi_index].y()
-                w = self.roi_list[roi_index].width()
-                h = self.roi_list[roi_index].height()
+                x = self.roi_list[roi_index]['rect'].x()
+                y = self.roi_list[roi_index]['rect'].y()
+                w = self.roi_list[roi_index]['rect'].width()
+                h = self.roi_list[roi_index]['rect'].height()
                 print(f'[{self.uid}: {self.vendor} - {self.model}] Error setting ROI ({x},{y},{w},{h})')
         else:
             print(f'[{self.uid}: {self.vendor} - {self.model}] Requesting invalid ROI')
+        self.roi_set.emit()
     
     def set_full_roi(self): # To Be Implemented by Child
         print(f'set_full_roi not implemented ({self.uid}: {self.vendor} - {self.model})')
@@ -123,9 +150,23 @@ class _CameraDevice(QObject):
         print(f'set_roi not implemented ({self.uid}: {self.vendor} - {self.model})')
         return True
     
+    def _get_default_roi_level(self,roi_index):
+        if (roi_index > 0) and (roi_index < (self.roi_levels+1)):
+            w = self.roi_list[0]['rect'].width()
+            h = self.roi_list[0]['rect'].height()
+            bin_factor = 2**roi_index
+            box_size = min( w//bin_factor, h//bin_factor )
+            x = w//2 - box_size//2
+            y = h//2 - box_size//2
+            entry = {'rect':QRect(x,y,box_size,box_size),'halo':0}
+            return entry
+        else:
+            return None
+    
     def _get_full_chip_size(self): # To Be Implemented by Child
         print(f'_get_full_chip_size not implemented ({self.uid}: {self.vendor} - {self.model})')
-        return QRect()
+        entry = {'rect':QRect(),'halo':0}
+        return entry
     
     ################################################################ Snap Frame
     
@@ -168,6 +209,79 @@ class _CameraDevice(QObject):
     def stop_acquisition(self):
         self.do_image = False
 
+############################################################################### DummyDevice
+
+class DummyCamera(_CameraDevice):
+    
+    ############################################################# CTOR and DTOR
+    
+    def __init__(self,name,camera_index=0,exposure_time_ms=100):
+        
+        self.raw_image = _imread('resources/SWTestbild_upscaled.tif')
+        
+        vendor = 'TestCamera'
+        model  = 'Telefunken_Test_Card_T05'
+        roi_levels = 2
+        
+        super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
+        self._internal_frame = np.zeros((0,0))
+            
+    def __del__(self):
+        pass
+    
+    ############################################### Implement common properties
+    
+    def _get_full_chip_size(self):
+        h,w = self.raw_image.shape
+        return QRect(0,0,int(w),int(h))
+    
+    def set_full_roi(self):
+        return True
+        
+    def set_roi(self,roi:QRect):
+        return True
+        
+    def write_exp_time(self):
+        pass
+    
+    def read_exp_time(self):
+        return self.exp_time_ms
+    
+    ##################################################### Acquisition functions
+    
+    def _gen_frame(self):
+        self._buffer_f32  = np.float32(self.raw_image)
+        self._buffer_f32 += np.random.normal(0,25*(300-self.exp_time_ms),self.raw_image.shape)
+        self._buffer_u16  = np.uint16( self._buffer_f32.clip(0,65535) )
+        return self._buffer_u16
+        
+    def _do_snap_frame(self):
+        self.frame_buffer = self._gen_frame()
+        self.frame_count  = 0
+        self.timestamp    = datetime.now()
+        self.frame_ready.emit()
+        
+    @pyqtSlot()
+    def _do_acquire_frames(self,max_frames):
+        
+        self.frame_count = 0
+        self.done_acquiring = False
+        
+        while self.do_image and not self.done_acquiring:
+            t0 = datetime.now()
+            self.frame_buffer = self._gen_frame()
+            self.timestamp    = datetime.now()
+            self.frame_count += 1
+            self.frame_ready.emit()
+            t1 = datetime.now()
+            delta = t1 - t0
+            delta = delta.total_seconds()*1000
+            if delta < self.exp_time_ms:
+                _sleep( (self.exp_time_ms-delta)/1000 )
+            self.done_acquiring = (self.frame_count>=max_frames) and (max_frames>0)
+        self.do_image = False
+        self.done_acquiring = True
+
 ############################################################################### HamamatsuCamera
 
 try:
@@ -183,7 +297,7 @@ if _should_use_dcam:
         
         ############################################################# CTOR and DTOR
         
-        def __init__(self,name,camera_index=0,exposure_time_ms=100):
+        def __init__(self,name,camera_index=0,exposure_time_ms=100,default_roi=0):
             
             assert Dcamapi.init(), "Cannot connect to DCAM (Hamamatsu) driver."
             self.camera = Dcam(camera_index)
@@ -198,6 +312,9 @@ if _should_use_dcam:
             self.frame_timeout_ms = 1000
             self.set_cooler_on()
             self.set_uint16()
+            self.set_roi_by_index(default_roi)
+            
+            print( self.roi_list )
             
         def __del__(self):
             self.camera.dev_close()
@@ -208,10 +325,15 @@ if _should_use_dcam:
         def set_uint16(self):
             self.camera.prop_setvalue(DCAM_IDPROP.IMAGE_PIXELTYPE,DCAM_PIXELTYPE.MONO16)
         
+        def get_cooler_range(self):
+            return [False,True]
+        
         def set_cooler_on(self):
+            self.cooler = True
             self.camera.prop_setvalue(DCAM_IDPROP.SENSORCOOLER,DCAMPROP.MODE.ON)
         
         def set_cooler_off(self):
+            self.cooler = False
             self.camera.prop_setvalue(DCAM_IDPROP.SENSORCOOLER,DCAMPROP.MODE.OFF)
         
         def set_cooler(self,turn_on:bool):
@@ -221,24 +343,26 @@ if _should_use_dcam:
                 self.set_cooler_off()
         
         def get_cooler(self):
-            return True if self.camera.prop_getvalue(DCAM_IDPROP.SENSORCOOLER) == DCAMPROP.MODE.ON else False
+            self.cooler = True if self.camera.prop_getvalue(DCAM_IDPROP.SENSORCOOLER) == DCAMPROP.MODE.ON else False
+            return self.cooler
         
         ############################################### Implement common properties
         
         def _get_full_chip_size(self):
             w = self.camera.prop_getvalue(DCAM_IDPROP.IMAGE_WIDTH)
             h = self.camera.prop_getvalue(DCAM_IDPROP.IMAGE_HEIGHT)
-            return QRect(0,0,int(w),int(h))
+            entry = {'rect':QRect(0,0,int(w),int(h)),'halo':0}
+            return entry
         
         def set_full_roi(self):
             self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYMODE,DCAMPROP.MODE.OFF)
             return True
             
         def set_roi(self,roi:QRect):
-            x = float(roi.x())
-            y = float(roi.y())
             w = float(roi.width())
             h = float(roi.height())
+            x = float(roi.x())
+            y = float(roi.y())
             self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYHPOS, x)
             self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYVPOS, y)
             self.camera.prop_setvalue(DCAM_IDPROP.SUBARRAYHSIZE,w)
@@ -293,75 +417,6 @@ else:
     from tifffile import imread as _imread
     from time import sleep as _sleep
     
-    class HamamatsuCamera(_CameraDevice):
-        
-        ############################################################# CTOR and DTOR
-        
-        def __init__(self,name,camera_index=0,exposure_time_ms=100):
-            
-            self.raw_image = _imread('resources/SWTestbild_upscaled.tif')
-            
-            vendor = 'TestCamera'
-            model  = 'Telefunken_Test_Card_T05'
-            roi_levels = 2
-            
-            super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
-            self._internal_frame = np.zeros((0,0))
-                
-        def __del__(self):
-            pass
-        
-        ############################################### Implement common properties
-        
-        def _get_full_chip_size(self):
-            h,w = self.raw_image.shape
-            return QRect(0,0,int(w),int(h))
-        
-        def set_full_roi(self):
-            return True
-            
-        def set_roi(self,roi:QRect):
-            return True
-            
-        def write_exp_time(self):
-            pass
-        
-        def read_exp_time(self):
-            return self.exp_time_ms
-        
-        ##################################################### Acquisition functions
-        
-        def _gen_frame(self):
-            self._buffer_f32  = np.float32(self.raw_image)
-            self._buffer_f32 += np.random.normal(0,25*(300-self.exp_time_ms),self.raw_image.shape)
-            self._buffer_u16  = np.uint16( self._buffer_f32.clip(0,65535) )
-            return self._buffer_u16
-            
-        def _do_snap_frame(self):
-            self.frame_buffer = self._gen_frame()
-            self.frame_count  = 0
-            self.timestamp    = datetime.now()
-            self.frame_ready.emit()
-            
-        @pyqtSlot()
-        def _do_acquire_frames(self,max_frames):
-            
-            self.frame_count = 0
-            self.done_acquiring = False
-            
-            while self.do_image and not self.done_acquiring:
-                t0 = datetime.now()
-                self.frame_buffer = self._gen_frame()
-                self.timestamp    = datetime.now()
-                self.frame_count += 1
-                self.frame_ready.emit()
-                t1 = datetime.now()
-                delta = t1 - t0
-                delta = delta.total_seconds()*1000
-                if delta < self.exp_time_ms:
-                    _sleep( (self.exp_time_ms-delta)/1000 )
-                self.done_acquiring = (self.frame_count>=max_frames) and (max_frames>0)
-            self.do_image = False
-            self.done_acquiring = True
-            
+    HamamatsuCamera = DummyCamera
+    
 # %%

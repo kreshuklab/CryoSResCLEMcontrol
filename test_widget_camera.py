@@ -9,7 +9,6 @@ from core.utils import create_dark_iconoir
 
 import qtmodern.styles
 
-
 # def custom_assert_handler(exc_type, exc_value, exc_traceback):
 #     if exc_type == AssertionError:
 #         app = QApplication.instance() or QApplication(sys.argv)  # Ensure QApplication exists
@@ -30,7 +29,7 @@ class MainWindow(QMainWindow):
         self.hcam = HamamatsuCamera("Main_Camera")
         
         self.setWindowTitle("Camera")
-        self.setGeometry(100, 100, 400, 400)
+        self.setGeometry(1000, 100, 800, 800)
 
         # Main central widget
         main_widget = QWidget()
@@ -48,14 +47,14 @@ class MainWindow(QMainWindow):
         
 create_dark_iconoir()
 
-# icon_prov = IconProvider()
-# icon_prov.set_dark_mode()
+icon_prov = IconProvider()
+icon_prov.set_dark_mode()
 
 app = QApplication.instance()  # Check if QApplication is already running
 if not app:  
     app = QApplication(sys.argv)
 
-# qtmodern.styles.dark(app)
+qtmodern.styles.dark(app)
 
 # app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
 # app.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyqt5'))
