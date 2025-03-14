@@ -224,7 +224,11 @@ class DummyCamera(_CameraDevice):
         roi_levels = 2
         
         super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
-        self._internal_frame = np.zeros((0,0))
+        self._internal_frame = np.zeros(self.raw_image.shape,np.uint16)
+        self.x0 = 0
+        self.y0 = 0
+        self.x1 = self.raw_image.shape[1]
+        self.y1 = self.raw_image.shape[0]
             
     def __del__(self):
         pass
@@ -233,12 +237,21 @@ class DummyCamera(_CameraDevice):
     
     def _get_full_chip_size(self):
         h,w = self.raw_image.shape
-        return QRect(0,0,int(w),int(h))
+        entry = {'rect':QRect(0,0,int(w),int(h)),'halo':0}
+        return entry
     
     def set_full_roi(self):
+        self.x0 = 0
+        self.y0 = 0
+        self.x1 = self.raw_image.shape[1]
+        self.y1 = self.raw_image.shape[0]
         return True
         
     def set_roi(self,roi:QRect):
+        self.x0 = roi.x()
+        self.y0 = roi.y()
+        self.x1 = roi.x() + roi.width()
+        self.y1 = roi.y() + roi.height()
         return True
         
     def write_exp_time(self):
@@ -250,8 +263,8 @@ class DummyCamera(_CameraDevice):
     ##################################################### Acquisition functions
     
     def _gen_frame(self):
-        self._buffer_f32  = np.float32(self.raw_image)
-        self._buffer_f32 += np.random.normal(0,25*(300-self.exp_time_ms),self.raw_image.shape)
+        self._buffer_f32  = np.float32(self.raw_image[self.y0:self.y1,self.x0:self.x1])
+        self._buffer_f32 += np.random.normal(0,25*(300-self.exp_time_ms),self._buffer_f32.shape)
         self._buffer_u16  = np.uint16( self._buffer_f32.clip(0,65535) )
         return self._buffer_u16
         

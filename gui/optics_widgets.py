@@ -4,6 +4,11 @@ from PyQt5.QtCore import QTimer, QThread, pyqtSignal, Qt
 # from PyQt5.QtGui import QFont
 from gui import IconProvider
 
+from gui.ui_utils import IconProvider
+from gui.ui_utils import create_iconized_button,update_iconized_button
+
+_g_icon_prov = IconProvider()
+
 ############################################################################### LaserWidget
 
 class LaserVerticalWidget(QWidget):
@@ -13,8 +18,6 @@ class LaserVerticalWidget(QWidget):
     def __init__(self,laser_device,laser_name,hex_color='#E07070',device_id=0,parent=None):
         super().__init__(parent)
         
-        icon_prov = IconProvider()
-        
         self.laser_thread = QThread(self)
         self.laser_device = laser_device
         self.device_id    = device_id
@@ -22,14 +25,10 @@ class LaserVerticalWidget(QWidget):
         
         self.title = self.create_title(laser_name,hex_color)
         
-        icon_dimmer = icon_prov.get_icon( icon_prov.dimmer_switch )
         self.percentage = QDoubleSpinBox()
-        percentage = self.create_percentage(icon_dimmer,self.percentage)
+        percentage = self.create_percentage(_g_icon_prov.dimmer_switch,self.percentage)
         
-        self.icon_turn_on  = icon_prov.get_icon( icon_prov.light_bulb_on )
-        self.icon_turn_off = icon_prov.get_icon( icon_prov.light_bulb_off )
-        self.power_button  = QPushButton("Turn on")
-        self.power_button.setIcon(self.icon_turn_on)
+        self.power_button = create_iconized_button(_g_icon_prov.light_bulb_on,'Turn on')
         
         self._create_layout(self.title,percentage,self.power_button)
         
@@ -94,7 +93,6 @@ class LaserVerticalWidget(QWidget):
         widget.setLayout(layout)
         return widget
     
-    
     def editing_finished(self):
         value = self.percentage.value()
         if value >= 0 and value <= 100.0:
@@ -102,12 +100,10 @@ class LaserVerticalWidget(QWidget):
     
     def button_trigger(self):
         if self.is_laser_on:
-            self.power_button.setText("Turn on")
-            self.power_button.setIcon(self.icon_turn_on)
+            update_iconized_button(self.power_button,_g_icon_prov.light_bulb_on,'Turn on')
             self.is_laser_on = False
         else:
-            self.power_button.setText("Turn off")
-            self.power_button.setIcon(self.icon_turn_off)
+            update_iconized_button(self.power_button,_g_icon_prov.light_bulb_off,'Turn off')
             self.is_laser_on = True
         self.set_power_status.emit(self.device_id,self.is_laser_on)
         

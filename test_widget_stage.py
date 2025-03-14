@@ -4,7 +4,7 @@ from PyQt5.QtGui import QPainter, QColor
 from PyQt5.QtCore import Qt, QSize, pyqtSignal, QThread
 
 from hardware import HamamatsuCamera
-from gui import CameraWidget, IconProvider
+from gui import StageWidget, IconProvider
 from core.utils import create_dark_iconoir
 
 import qtmodern.styles
@@ -25,25 +25,17 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.hcam_th = QThread()
-        self.hcam = HamamatsuCamera("Main_Camera")
+        self.setWindowTitle("Stage")
         
-        self.setWindowTitle("Camera")
-        self.setGeometry(1000, 100, 800, 800)
-
         # Main central widget
         main_widget = QWidget()
         layout = QVBoxLayout()
         
-        hcam_widget = CameraWidget(self.hcam,"Main")
+        stage_widget = StageWidget(None,"AttoCube")
         
-        layout.addWidget(hcam_widget)
+        layout.addWidget(stage_widget)
         main_widget.setLayout(layout)
         self.setCentralWidget(main_widget)
-    
-    def closeEvent(self, event):
-        self.hcam.stop_acquisition()
-        event.accept()
         
 create_dark_iconoir()
 
@@ -60,8 +52,6 @@ icon_prov = IconProvider()
 icon_prov.load_dark_mode()
 
 window = MainWindow()
-
-
 
 window.show()
 app.exec_()

@@ -10,7 +10,8 @@ import numpy as np
 from core.utils import FixedSizeNumpyQueue,get_min_max_avg
 from ndstorage import NDTiffDataset
 from gui.ui_utils import IconProvider
-from gui.ui_utils import create_iconized_button,create_int_line_edit,create_combo_box
+from gui.ui_utils import create_iconized_button,update_iconized_button
+from gui.ui_utils import create_int_line_edit,create_combo_box
 from os.path import exists as _exists
 
 ############################################################################### Image to NDTiff helper
@@ -139,6 +140,8 @@ class ImageToQImage(QObject):
         self.frame_ready.emit()
 
 ############################################################################### Custom GraphicsScene
+
+_g_icon_prov = IconProvider()
 
 class ROIItem(QGraphicsItem):
     def __init__(self,color_hex,outer_box=128,halo=0,parent=None):
@@ -438,17 +441,15 @@ class CameraWidget(QWidget):
         widget = QWidget()
         layout = QVBoxLayout()
         
-        icon_prov = IconProvider()
-        
         name_label = QLabel(f'<strong>{camera_name}</strong> [{self.cam_handler.vendor} - {self.cam_handler.model}]')
         name_label.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
         
         stat_widget = QWidget()
         stat_layout = QHBoxLayout()
         
-        self.btn_zoom_full = create_iconized_button(icon_prov.expand)
-        self.btn_zoom_in   = create_iconized_button(icon_prov.zoom_in)
-        self.btn_zoom_out  = create_iconized_button(icon_prov.zoom_out)
+        self.btn_zoom_full = create_iconized_button(_g_icon_prov.expand  ,tooltip='View full image')
+        self.btn_zoom_in   = create_iconized_button(_g_icon_prov.zoom_in ,tooltip='Zoom in')
+        self.btn_zoom_out  = create_iconized_button(_g_icon_prov.zoom_out,tooltip='Zoom out')
         
         stat_layout.addWidget(self.btn_zoom_full)
         stat_layout.addWidget(self.btn_zoom_in  )
@@ -508,8 +509,6 @@ class CameraWidget(QWidget):
 
     def create_lower_panel(self):
         
-        icon_prov = IconProvider()
-        
         widget = QWidget()
         layout = QGridLayout()
         layout.setContentsMargins(0,0,0,0)
@@ -518,8 +517,8 @@ class CameraWidget(QWidget):
         buttons_layout = QHBoxLayout()
         buttons_layout.setContentsMargins(0,0,0,0)
         
-        self.snap_button = create_iconized_button(icon_prov.camera)
-        self.live_button = create_iconized_button(icon_prov.video_camera)
+        self.snap_button = create_iconized_button(_g_icon_prov.camera      ,tooltip='Grab a frame')
+        self.live_button = create_iconized_button(_g_icon_prov.video_camera,tooltip='Start acquisition')
         buttons_layout.addStretch(0)
         buttons_layout.addWidget(self.snap_button)
         buttons_layout.addWidget(self.live_button)
@@ -535,8 +534,6 @@ class CameraWidget(QWidget):
     
     def create_saving_panel(self):
         
-        icon_prov = IconProvider()
-        
         widget = QWidget()
         layout = QHBoxLayout()
         
@@ -550,7 +547,7 @@ class CameraWidget(QWidget):
         self.num_frames.setSingleStep(10)
         self.num_frames.setValue(0)
         
-        self.save_button = create_iconized_button(icon_prov.floppy_disk_arrow_in)
+        self.save_button = create_iconized_button(_g_icon_prov.floppy_disk_arrow_in,tooltip='Save frame/frames')
         
         input_layout.addRow('Save to:',self.filename)
         input_layout.addRow('Num. Frames:',self.num_frames)
@@ -565,8 +562,6 @@ class CameraWidget(QWidget):
     
     def create_configuration_panel(self):
         
-        icon_prov = IconProvider()
-        
         widget = QWidget()
         layout = QVBoxLayout()
         
@@ -575,10 +570,10 @@ class CameraWidget(QWidget):
         roi_button_widget = QWidget()
         roi_button_layout = QHBoxLayout()
         roi_button_layout.setContentsMargins(0,0,0,0)
-        self.roi_button_show = create_iconized_button(icon_prov.iris_scan)
-        self.roi_button_pick = create_iconized_button(icon_prov.border_out)
-        self.roi_button_in   = create_iconized_button(icon_prov.scale_frame_reduce)
-        self.roi_button_out  = create_iconized_button(icon_prov.scale_frame_enlarge)
+        self.roi_button_show = create_iconized_button(_g_icon_prov.iris_scan          ,tooltip='Show ROI')
+        self.roi_button_pick = create_iconized_button(_g_icon_prov.border_out         ,tooltip='Pick ROI center')
+        self.roi_button_in   = create_iconized_button(_g_icon_prov.scale_frame_reduce ,tooltip='ROI in')
+        self.roi_button_out  = create_iconized_button(_g_icon_prov.scale_frame_enlarge,tooltip='ROI out')
         roi_button_layout.addWidget(self.roi_button_show)
         roi_button_layout.addWidget(self.roi_button_pick)
         roi_button_layout.addWidget(self.roi_button_in  )
@@ -653,18 +648,18 @@ class CameraWidget(QWidget):
     
     @pyqtSlot()
     def start_acquisition(self):
-        icon_prov = IconProvider()
         self.is_live = True
-        self.live_button.setIcon(QIcon(icon_prov.video_camera_off))
+        update_iconized_button(self.live_button,_g_icon_prov.video_camera_off,tooltip='Stop acquisition')
+        self.snap_button.setEnabled(False)
         self.start_acquiring.emit()
     
     @pyqtSlot()
     def stop_acquisition(self):
-        icon_prov = IconProvider()
         self.is_live = False
-        self.live_button.setIcon(QIcon(icon_prov.video_camera))
+        update_iconized_button(self.live_button,_g_icon_prov.video_camera,tooltip='Start acquisition')
         self.cam_handler.stop_acquisition()
         self.img2tiff.stop_acquisition()
+        self.snap_button.setEnabled(True)
         self.stop_acquiring.emit()
     
     @pyqtSlot()
@@ -790,6 +785,9 @@ class CameraWidget(QWidget):
     def clicked_roi_in(self):
         x,y,N = self._get_roi_entries()
         self.cam_handler.next_roi(x,y,N)
+        if self.image.track_roi:
+            self.image.disable_roi_tracking()
+            update_iconized_button(self.roi_button_pick,_g_icon_prov.border_out,tooltip='Pick ROI center')
     
     @pyqtSlot()
     def clicked_roi_out(self):
@@ -807,14 +805,13 @@ class CameraWidget(QWidget):
         
     @pyqtSlot()
     def clicked_roi_pick(self):
-        icon_prov = IconProvider()
         if self.image.track_roi:
             self.image.disable_roi_tracking()
-            self.roi_button_pick.setIcon(QIcon(icon_prov.border_out))
+            update_iconized_button(self.roi_button_pick,_g_icon_prov.border_out,tooltip='Pick ROI center')
         else:
             x,y,N = self._get_roi_entries()
             self.image.enable_roi_tracking(x,y,N)
-            self.roi_button_pick.setIcon(QIcon(icon_prov.xmark))
+            update_iconized_button(self.roi_button_pick,_g_icon_prov.xmark,tooltip='Cancel')
             
     @pyqtSlot(int,int)
     def got_new_roi_position(self,x,y):

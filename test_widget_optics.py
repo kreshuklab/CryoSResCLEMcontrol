@@ -80,12 +80,14 @@ class MainWindow(QMainWindow):
 from core.utils import create_dark_iconoir
 
 create_dark_iconoir()
-icon_prov = IconProvider()
-icon_prov.set_dark_mode()
 
 app = QApplication.instance()  # Check if QApplication is already running
 if not app:  
     app = QApplication(sys.argv)
+
+icon_prov = IconProvider()
+icon_prov.load_dark_mode()
+
 qtmodern.styles.dark(app)
 
 window = MainWindow()
