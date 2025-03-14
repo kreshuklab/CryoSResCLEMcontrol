@@ -15,7 +15,7 @@ class _CameraDevice(QObject):
     acquisition_started  = pyqtSignal()
     acquisition_finished = pyqtSignal()
     
-    def __init__(self,unique_id,vendor,model,roi_levels,pix_size_nm,exp_time_ms):
+    def __init__(self,unique_id,vendor,model,roi_levels,pix_size_nm,exp_time_ms,step_roi_pos=1,step_roi_siz=1):
         super().__init__()
         
         self.frame_buffer = np.zeros((0,0))
@@ -27,6 +27,9 @@ class _CameraDevice(QObject):
         self.model       = model
         self.roi_levels  = max(roi_levels,1)
         self.pix_size_nm = pix_size_nm
+        
+        self.step_roi_pos = step_roi_pos
+        self.step_roi_siz = step_roi_siz
         
         self.is_busy = False
         self.do_image = False
@@ -54,7 +57,6 @@ class _CameraDevice(QObject):
                 self._update_configuration_function(*self._update_configuration_argument)
             self._update_configuration_function = None
             self._update_configuration_argument = None
-            print(self._update_configuration_function,self._update_configuration_argument)
             self._acquire.emit()
         
     ############################################################# Exposure Time
@@ -312,7 +314,7 @@ if _should_use_dcam:
         
         def __init__(self,name,camera_index=0,exposure_time_ms=100,default_roi=0):
             
-            assert Dcamapi.init(), "Cannot connect to DCAM (Hamamatsu) driver."
+            assert Dcamapi.init(), "Cannot connect to DCAM (Hamamatsu) driver.\n Do you have one? or is it being used by another software?"
             self.camera = Dcam(camera_index)
             assert self.camera.dev_open(), f"Failed to open camera {camera_index}."
             
@@ -320,14 +322,17 @@ if _should_use_dcam:
             model  = self.camera.dev_getstring(DCAM_IDSTR.MODEL)
             roi_levels = 2
             
-            super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
+            # Configuration of common parameter for cameras
+            super().__init__(name,vendor,model,roi_levels,
+                             pix_size_nm=136,
+                             exp_time_ms=exposure_time_ms,
+                             step_roi_pos=4,
+                             step_roi_siz=8)
             
             self.frame_timeout_ms = 1000
             self.set_cooler_on()
             self.set_uint16()
             self.set_roi_by_index(default_roi)
-            
-            print( self.roi_list )
             
         def __del__(self):
             self.camera.dev_close()
@@ -406,8 +411,6 @@ if _should_use_dcam:
             
         @pyqtSlot()
         def _do_acquire_frames(self,max_frames):
-            print('Requested Exposure time: ', self.get_exp_time())
-            print('Is cooling: ', self.get_cooler())
             
             assert self.camera.buf_alloc(3), "Failed to create buffer for camera"
             

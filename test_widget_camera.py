@@ -9,23 +9,21 @@ from core.utils import create_dark_iconoir
 
 import qtmodern.styles
 
-# def custom_assert_handler(exc_type, exc_value, exc_traceback):
-#     if exc_type == AssertionError:
-#         app = QApplication.instance() or QApplication(sys.argv)  # Ensure QApplication exists
-#         QMessageBox.critical(None, "Assertion Failed", str(exc_value))
-#         sys.exit(1)  # Optional: exit the app after showing the message box
+def custom_assert_handler(exc_type, exc_value, exc_traceback):
+    if exc_type == AssertionError:
+        app = QApplication.instance() or QApplication(sys.argv)  # Ensure QApplication exists
+        QMessageBox.critical(None, "Assertion Failed", str(exc_value))
+        sys.exit(1)  # Optional: exit the app after showing the message box
 
-# # Override default exception handler
-# sys.excepthook = custom_assert_handler
+# Override default exception handler
+sys.excepthook = custom_assert_handler
 
-# import qdarkstyle
 
 class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
 
-        self.hcam_th = QThread()
         self.hcam = HamamatsuCamera("Main_Camera")
         
         self.setWindowTitle("Camera")

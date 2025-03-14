@@ -9,7 +9,7 @@ from PyQt5.QtGui import QFontMetrics, QIntValidator, QPainter, QPen, QBrush, QCo
 import numpy as np
 from core.utils import FixedSizeNumpyQueue,get_min_max_avg
 from ndstorage import NDTiffDataset
-from gui.ui_utils import IconProvider
+from gui.ui_utils import IconProvider,IntMultipleOfValidator, SteppingSpinBox
 from gui.ui_utils import create_iconized_button,update_iconized_button
 from gui.ui_utils import create_int_line_edit,create_combo_box
 from os.path import exists as _exists
@@ -205,7 +205,8 @@ class CameraScene(QGraphicsScene):
             self.addItem(self.image)
             self.image.setZValue(-1)
             self.image.setPos(0,0)
-            self.image.setTransformationMode( Qt.TransformationMode.SmoothTransformation )
+            # self.image.setTransformationMode( Qt.TransformationMode.SmoothTransformation )
+            self.image.setTransformationMode( Qt.TransformationMode.FastTransformation )
             should_fit = True
             
         pixmap = QPixmap.fromImage(qimg)
@@ -312,7 +313,6 @@ class CameraViewer(QGraphicsView):
             if self.track_roi:
                 x = int( self.scene_handler.moving_roi.pos().x() )
                 y = int( self.scene_handler.moving_roi.pos().y() )
-                self.scene_handler.current_roi.setPos(x,y)
                 self.new_position.emit(x,y)
         
     def mouseReleaseEvent(self,event):
@@ -336,6 +336,16 @@ class CameraViewer(QGraphicsView):
             
         super().mouseMoveEvent(event)
         
+    @pyqtSlot(int,int)
+    def roi_new_pos(self,x,y):
+        self.scene_handler.current_roi.setPos(x,y)
+    
+    @pyqtSlot(int,int)
+    def roi_new_siz(self,N,halo):
+        self.scene_handler.halo_size = halo
+        self.scene_handler.current_roi.set_box_size(N,halo)
+        self.scene_handler.moving_roi.set_box_size(N,halo)
+    
     @pyqtSlot()
     def zoom_in(self):
         factor = 1.25
@@ -374,6 +384,9 @@ class CameraWidget(QWidget):
     start_acquiring = pyqtSignal()
     stop_acquiring  = pyqtSignal()
     
+    roi_new_pos = pyqtSignal(int,int)
+    roi_new_siz = pyqtSignal(int,int)
+    
     def __init__(self,camera_handler,camera_name,*args,**kwargs):
         super().__init__(*args,**kwargs)
         
@@ -381,7 +394,7 @@ class CameraWidget(QWidget):
         self.working_dir = ""
         
         self.cam_handler = camera_handler
-        self.cam_thread  = QThread(self)
+        self.cam_thread  = QThread()
         self.cam_handler.moveToThread(self.cam_thread)
         
         self.img2qimg    = ImageToQImage(self.cam_handler)
@@ -428,6 +441,12 @@ class CameraWidget(QWidget):
         
         self.cam_handler.frame_ready.connect(self.img2qimg.got_frame)
         self.cam_handler.frame_ready.connect(self.img2tiff.got_frame)
+        
+        self.roi_config_pos_x.editingFinished.connect(self.roi_pos_modified)
+        self.roi_config_pos_y.editingFinished.connect(self.roi_pos_modified)
+        
+        self.roi_new_pos.connect( self.image.roi_new_pos )
+        self.roi_new_siz.connect( self.image.roi_new_siz )
         
         self.img2qimg.frame_ready.connect( self.update_image )
         self.img2tiff.finish_saving.connect( self.saving_finished )
@@ -586,12 +605,12 @@ class CameraWidget(QWidget):
         roi_config_layout = QHBoxLayout()
         roi_config_layout.setContentsMargins(0,0,0,0)
         self.roi_config_label = QLabel('Next ROI X/Y:')
-        self.roi_config_pos_x = create_int_line_edit(0,4000,'X')
-        self.roi_config_pos_y = create_int_line_edit(0,4000,'Y')
-        self.roi_config_size  = QSpinBox()
-        self.roi_config_size.setRange(0,4000) # ToDo: validate multiple of 8
-        self.roi_config_size.setSingleStep(4)
-        self.roi_config_size.setValue(512)
+        self.roi_config_pos_x = create_int_line_edit(0,4000,'X',IntMultipleOfValidator(self.cam_handler.step_roi_pos))
+        self.roi_config_pos_y = create_int_line_edit(0,4000,'Y',IntMultipleOfValidator(self.cam_handler.step_roi_pos))
+        self.roi_config_size  = SteppingSpinBox(step=self.cam_handler.step_roi_siz,current_value=512,max_value=4000)
+        # self.roi_config_size.setRange(0,4000) # ToDo: validate multiple of 8
+        # self.roi_config_size.setSingleStep(8)
+        # self.roi_config_size.setValue(512)
         roi_config_layout.addWidget(self.roi_config_label)
         roi_config_layout.addWidget(self.roi_config_pos_x)
         roi_config_layout.addWidget(self.roi_config_pos_y)
@@ -815,8 +834,22 @@ class CameraWidget(QWidget):
             
     @pyqtSlot(int,int)
     def got_new_roi_position(self,x,y):
-        self.roi_config_pos_x.setText( str(x) )
-        self.roi_config_pos_y.setText( str(y) )
+        base = self.cam_handler.step_roi_pos
+        x = int(base*np.round(float(x)/base))
+        y = int(base*np.round(float(y)/base))
+        self.roi_config_pos_x.setText(str(x))
+        self.roi_config_pos_y.setText(str(y))
+        self.roi_new_pos.emit(x,y)
+        
+    @pyqtSlot()
+    def roi_pos_modified(self):
+        x,y,_ = self._get_roi_entries()
+        self.roi_new_pos.emit(x,y)
+        
+    @pyqtSlot()
+    def roi_siz_modified(self):
+        _,_,N = self._get_roi_entries()
+        self.roi_new_siz.emit(N,self.cam_handler.halo_size)
         
     def __del__(self):
         

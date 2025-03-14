@@ -1,7 +1,8 @@
 from PyQt5.QtCore import Qt,QSize
-from PyQt5.QtGui import QIcon, QFontMetrics,QIntValidator
-from PyQt5.QtWidgets import QPushButton, QLineEdit, QComboBox
+from PyQt5.QtGui import QIcon, QFontMetrics,QIntValidator,QValidator
+from PyQt5.QtWidgets import QPushButton, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox
 from glob import glob
+import numpy as np
 
 ############################################################################### Icon Provider
 
@@ -39,33 +40,43 @@ class IconProvider:
             icon.addFile(icon_entry[1],mode=QIcon.Disabled)
             setattr(self, icon_entry[0],icon)
 
-# class _IconProviderMeta(type):
-#     _instances = {}
+############################################################################### SteppingSpinBox
 
-#     def __call__(cls, *args, **kwargs):
-#         if cls not in cls._instances:
-#             cls._instances[cls] = super().__call__(*args, **kwargs)
-#         return cls._instances[cls]
+class SteppingSpinBox(QSpinBox):
+    def __init__(self,step,current_value=0,min_val=0,max_value=2147483647,parent=None):
+        super().__init__(parent)
+        self.base = step
+        self.setSingleStep(step)
+        self.setMinimum(min_val)
+        self.setMaximum(max_value)
+        self.setValue(current_value)
 
-
-# class IconProvider(metaclass=_IconProviderMeta):
-#     def __init__(self):
-#         files = glob('resources/*.svg')
-#         for file in files:
-#             if not file.endswith('_dark.svg'):
-#                 attribute_name =  file[10:-4]
-#                 attribute_name = attribute_name.replace('-','_')
-#                 setattr(self,attribute_name,file)
+    def validate(self, in_str, pos):
+        if not in_str:
+            return QValidator.Intermediate, in_str, pos
         
-#     def set_dark_mode(self):
-#         files = glob('resources/*_dark.svg')
-#         for file in files:
-#             attribute_name =  file[10:-9]
-#             attribute_name = attribute_name.replace('-','_')
-#             setattr(self,attribute_name,file)
+        try:
+            val = int(in_str)
+            if (val % self.base) == 0:
+                return QValidator.Acceptable, in_str, pos
+            else:
+                return QValidator.Intermediate, in_str, pos
+        except ValueError:
+            return QValidator.Invalid, in_str, pos
     
-#     def get_icon(self,icon_filename):
-#         return QIcon(icon_filename)
+    def fixup(self, in_str):
+        try:
+            val = int(in_str)
+            val = int(self.base*np.round(float(val)/self.base))
+            return str(val)
+        except ValueError:
+            return ""
+            return ""
+
+    def stepBy(self, steps):
+        value = self.value()
+        new_value = value + steps * self.base  # Ensure stepping in multiples of 4
+        self.setValue(new_value)
 
 ############################################################################### Create Button with Icon
 
@@ -90,7 +101,7 @@ def update_iconized_button(button,icon:QIcon,text:str='',tooltip:str='',size:QSi
 
 ############################################################################### Create QLineEdit for integers
 
-def create_int_line_edit(val_min,val_max,placeholder_text=''):
+def create_int_line_edit(val_min,val_max,placeholder_text='',validator=None):
     line_edit     = QLineEdit()
     font_metrics  = QFontMetrics(line_edit.font())
     int_validator = QIntValidator(val_min,val_max)
@@ -101,6 +112,9 @@ def create_int_line_edit(val_min,val_max,placeholder_text=''):
     line_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
     line_edit.setValidator(int_validator)
     line_edit.setMinimumWidth(min_width)
+    
+    if validator:
+        line_edit.setValidator(validator)
     
     return line_edit
 
@@ -114,3 +128,52 @@ def create_combo_box(entries,current_entry):
     combo_box.setCurrentIndex(current_index)
     return combo_box
 
+############################################################################### Create QSpinBox
+
+def create_spinbox(min_val,max_val,cur_val,step=1):
+    spin_box = QSpinBox()
+    spin_box.setFocusPolicy(Qt.ClickFocus)
+    spin_box.setMinimum(min_val)
+    spin_box.setMaximum(max_val)
+    spin_box.setValue(cur_val)
+    spin_box.setSingleStep(step)
+    return spin_box
+
+def create_doublespinbox(min_val,max_val,cur_val,step=1,decimals=2):
+    spin_box = QDoubleSpinBox()
+    spin_box.setFocusPolicy(Qt.ClickFocus)
+    spin_box.setMinimum(min_val)
+    spin_box.setMaximum(max_val)
+    spin_box.setValue(cur_val)
+    spin_box.setSingleStep(step)
+    spin_box.setDecimals(decimals)
+    return spin_box
+
+############################################################################### Int Validator multiple of
+
+class IntMultipleOfValidator(QValidator):
+    
+    def __init__(self,base=1):
+        super().__init__()
+        self.base = base
+    
+    def validate(self, in_str, pos):
+        if not in_str:
+            return QValidator.Intermediate, in_str, pos
+        
+        try:
+            val = int(in_str)
+            if (val % self.base) == 0:
+                return QValidator.Acceptable, in_str, pos
+            else:
+                return QValidator.Intermediate, in_str, pos
+        except ValueError:
+            return QValidator.Invalid, in_str, pos
+
+    def fixup(self, in_str):
+        try:
+            val = int(in_str)
+            val = int(self.base*np.round(float(val)/self.base))
+            return str(val)
+        except ValueError:
+            return ""
