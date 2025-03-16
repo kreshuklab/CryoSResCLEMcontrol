@@ -21,6 +21,7 @@ _g_icon_prov = IconProvider()
 class _DPadWidget(QWidget):
     got_focus    = pyqtSignal()
     lost_focus   = pyqtSignal()
+    send_commit  = pyqtSignal()
     send_command = pyqtSignal(str,int)
     
     def __init__(self,parent=None):
@@ -38,23 +39,27 @@ class _DPadWidget(QWidget):
     def keyPressEvent(self,event):
         key = event.key()
         
-        if  (key == Qt.Key_A) or (key == Qt.Key_Left):
+        if   key in (Qt.Key_A,Qt.Key_Left):
             self.send_command.emit('x',-1)
             
-        elif(key == Qt.Key_D) or (event.key() == Qt.Key_Right):
+        elif key in (Qt.Key_D,Qt.Key_Right):
             self.send_command.emit('x', 1)
             
-        elif(key == Qt.Key_W) or (key == Qt.Key_Up):
+        elif key in (Qt.Key_W,Qt.Key_Up):
             self.send_command.emit('y', 1)
             
-        elif(key == Qt.Key_S) or (key == Qt.Key_Down):
+        elif key in (Qt.Key_S,Qt.Key_Down):
             self.send_command.emit('y',-1)
             
-        elif(key == Qt.Key_Q) or (key == Qt.Key_PageUp):
+        elif key in (Qt.Key_Q,Qt.Key_PageUp):
             self.send_command.emit('z', 1)
             
-        elif(key == Qt.Key_E) or (key == Qt.Key_PageDown):
+        elif key in (Qt.Key_E,Qt.Key_PageDown):
             self.send_command.emit('z',-1)
+        
+        elif key in (Qt.Key_Space,Qt.Key_Enter):
+            self.send_commit.emit()
+        
         else:
             super().keyPressEvent(event)
 
@@ -214,10 +219,8 @@ class StageWidget(QWidget):
     @pyqtSlot(str,int)
     def send_move_offset_command(self,axis_name,direction):
         if self._is_coarse():
-            print(f'coarse move {axis_name} {direction}')
             self.send_move.emit(self.axis[axis_name],direction>0,self.n_steps.currentData())
         else:
-            print(f'fine move {axis_name} {direction}')
             offset = np.sign(direction)*self.offsets[axis_name].value()
             self.send_ofst.emit(self.axis[axis_name],offset)
     

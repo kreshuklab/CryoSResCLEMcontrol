@@ -49,7 +49,6 @@ class _CameraDevice(QObject):
     
     @pyqtSlot()
     def _update_configuration(self):
-        print('Updating')
         if self._update_configuration_function is not None:
             if self._update_configuration_argument is None:
                 self._update_configuration_function()
@@ -225,7 +224,7 @@ class DummyCamera(_CameraDevice):
         model  = 'Telefunken_Test_Card_T05'
         roi_levels = 2
         
-        super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms)
+        super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms,step_roi_pos=4,step_roi_siz=8)
         self._internal_frame = np.zeros(self.raw_image.shape,np.uint16)
         self.x0 = 0
         self.y0 = 0

@@ -40,6 +40,11 @@ class IconProvider:
             icon.addFile(icon_entry[1],mode=QIcon.Disabled)
             setattr(self, icon_entry[0],icon)
 
+############################################################################### QLabel style
+
+def colorbar_style_sheet(color,border_pix=1,bg_color='#000000'):
+    return f'QLabel {{ background-color: {color}; border: {border_pix}px solid {color} }} QLabel:disabled {{ background-color: {bg_color}; border: {border_pix}px solid {color} }}'
+
 ############################################################################### SteppingSpinBox
 
 class SteppingSpinBox(QSpinBox):

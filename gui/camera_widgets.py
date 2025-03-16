@@ -1,18 +1,18 @@
 from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtCore import QElapsedTimer, QPoint, QRectF, QPointF
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
-from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QOpenGLWidget, QGraphicsItem
-from PyQt5.QtWidgets import QPushButton, QLabel, QLineEdit, QSpinBox, QComboBox
-from PyQt5.QtWidgets import QSizePolicy, QFrame
-from PyQt5.QtGui import QImage, QPixmap, QIcon, QFont, QPalette, QColor, QTransform
-from PyQt5.QtGui import QFontMetrics, QIntValidator, QPainter, QPen, QBrush, QColor
+from PyQt5.QtWidgets import QWidget, QOpenGLWidget
+from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
+from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QGraphicsItem
+from PyQt5.QtWidgets import QLabel, QLineEdit, QSpinBox, QComboBox
+from PyQt5.QtWidgets import QFrame
+from PyQt5.QtGui import QImage, QPixmap, QFont, QPalette, QColor, QTransform
+from PyQt5.QtGui import QPainter, QPen, QBrush, QWheelEvent
 import numpy as np
 from core.utils import FixedSizeNumpyQueue,get_min_max_avg
 from ndstorage import NDTiffDataset
 from gui.ui_utils import IconProvider,IntMultipleOfValidator, SteppingSpinBox
 from gui.ui_utils import create_iconized_button,update_iconized_button
 from gui.ui_utils import create_int_line_edit,create_combo_box
-from os.path import exists as _exists
 
 ############################################################################### Image to NDTiff helper
 
@@ -252,6 +252,8 @@ class CameraScene(QGraphicsScene):
 
 class CameraViewer(QGraphicsView):
     new_position = pyqtSignal(int,int)
+    set_roi_up   = pyqtSignal()
+    set_roi_down = pyqtSignal()
     
     def __init__(self, qimg_provider, parent=None, useOpenGL=True, background='black'):
         
@@ -336,6 +338,18 @@ class CameraViewer(QGraphicsView):
             
         super().mouseMoveEvent(event)
         
+    def wheelEvent(self, event:QWheelEvent):
+        if event.modifiers() == Qt.ControlModifier:
+            if event.angleDelta().y() > 0:
+                self.set_roi_up.emit()
+            else:
+                self.set_roi_down.emit()
+        else:
+            if event.angleDelta().y() > 0:
+                self.zoom_in()
+            else:
+                self.zoom_out()
+    
     @pyqtSlot(int,int)
     def roi_new_pos(self,x,y):
         self.scene_handler.current_roi.setPos(x,y)
@@ -345,6 +359,8 @@ class CameraViewer(QGraphicsView):
         self.scene_handler.halo_size = halo
         self.scene_handler.current_roi.set_box_size(N,halo)
         self.scene_handler.moving_roi.set_box_size(N,halo)
+        self.scene_handler.current_roi.update()
+        self.scene_handler.moving_roi.update()
     
     @pyqtSlot()
     def zoom_in(self):
@@ -356,12 +372,6 @@ class CameraViewer(QGraphicsView):
         factor = 0.8
         self.scale(factor,factor)
         
-    def wheelEvent(self, event):
-        if event.angleDelta().y() > 0:
-            self.zoom_in()
-        else:
-            self.zoom_out()
-    
     def show_current_roi(self,x,y,box_size):
         self.scene_handler.show_current_roi(x,y,box_size)
     
@@ -434,6 +444,8 @@ class CameraWidget(QWidget):
         self.roi_button_pick.clicked.connect(self.clicked_roi_pick)
         self.cam_handler.roi_set.connect( self.update_roi_state )
         self.image.new_position.connect( self.got_new_roi_position )
+        self.image.set_roi_up  .connect( self.roi_up   )
+        self.image.set_roi_down.connect( self.roi_down )
         
         self.start_acquiring.connect(self.cam_handler.acquire_frames)
         
@@ -444,6 +456,7 @@ class CameraWidget(QWidget):
         
         self.roi_config_pos_x.editingFinished.connect(self.roi_pos_modified)
         self.roi_config_pos_y.editingFinished.connect(self.roi_pos_modified)
+        self.roi_config_size .editingFinished.connect(self.roi_siz_modified)
         
         self.roi_new_pos.connect( self.image.roi_new_pos )
         self.roi_new_siz.connect( self.image.roi_new_siz )
@@ -608,9 +621,6 @@ class CameraWidget(QWidget):
         self.roi_config_pos_x = create_int_line_edit(0,4000,'X',IntMultipleOfValidator(self.cam_handler.step_roi_pos))
         self.roi_config_pos_y = create_int_line_edit(0,4000,'Y',IntMultipleOfValidator(self.cam_handler.step_roi_pos))
         self.roi_config_size  = SteppingSpinBox(step=self.cam_handler.step_roi_siz,current_value=512,max_value=4000)
-        # self.roi_config_size.setRange(0,4000) # ToDo: validate multiple of 8
-        # self.roi_config_size.setSingleStep(8)
-        # self.roi_config_size.setValue(512)
         roi_config_layout.addWidget(self.roi_config_label)
         roi_config_layout.addWidget(self.roi_config_pos_x)
         roi_config_layout.addWidget(self.roi_config_pos_y)
@@ -827,10 +837,12 @@ class CameraWidget(QWidget):
         if self.image.track_roi:
             self.image.disable_roi_tracking()
             update_iconized_button(self.roi_button_pick,_g_icon_prov.border_out,tooltip='Pick ROI center')
+            self.roi_button_show.setEnabled(True)
         else:
             x,y,N = self._get_roi_entries()
             self.image.enable_roi_tracking(x,y,N)
             update_iconized_button(self.roi_button_pick,_g_icon_prov.xmark,tooltip='Cancel')
+            self.roi_button_show.setEnabled(False)
             
     @pyqtSlot(int,int)
     def got_new_roi_position(self,x,y):
@@ -848,22 +860,29 @@ class CameraWidget(QWidget):
         
     @pyqtSlot()
     def roi_siz_modified(self):
-        _,_,N = self._get_roi_entries()
-        self.roi_new_siz.emit(N,self.cam_handler.halo_size)
+        N = self.roi_config_size.value()
+        # halo = self.get_next_halo()?
+        self.roi_new_siz.emit(N,0)
         
-    def __del__(self):
-        
-        print('Waiting for Img2Tiff')
+    @pyqtSlot()
+    def roi_up(self):
+        self.roi_config_size.stepUp()
+        self.roi_siz_modified()
+    
+    @pyqtSlot()
+    def roi_down(self):
+        self.roi_config_size.stepDown()
+        self.roi_siz_modified()
+    
+    def free(self):
         if self.img2tiff_th and self.img2tiff_th.isRunning():
             self.img2tiff_th.quit()
             self.img2tiff_th.wait()  # Ensure thread stops before deleting
         
-        print('Waiting for Img2QImg')
         if self.img2qimg_th and self.img2qimg_th.isRunning():
             self.img2qimg_th.quit()
             self.img2qimg_th.wait()  # Ensure thread stops before deleting
         
-        print('Waiting for CameraThread')
         if self.cam_thread and self.cam_thread.isRunning():
             self.cam_thread.quit()
             self.cam_thread.wait()  # Ensure thread stops before deleting

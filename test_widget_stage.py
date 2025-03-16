@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QMainWin
 from PyQt5.QtGui import QPainter, QColor
 from PyQt5.QtCore import Qt, QSize, pyqtSignal, QThread
 
-from hardware import AttoCom
+from hardware import AttoCom,DummyStage
 from gui import StageWidget, IconProvider
 from core.utils import create_dark_iconoir
 
@@ -31,24 +31,22 @@ class MainWindow(QMainWindow):
         main_widget = QWidget(self)
         layout = QVBoxLayout()
         
-        self.stage_driver = AttoCom(com_port='COM5')
+        #self.stage_driver = AttoCom(com_port='COM5')
+        self.stage_driver = DummyStage('AttoCube')
         self.stage_driver.show_commands = True
-        self.stage_driver.set_mode_mixed(1)
-        self.stage_driver.set_mode_mixed(2)
-        self.stage_driver.set_mode_mixed(3)
+        self.stage_driver.set_mode_mixed()
         self.stage_driver.positioning_fine_absolute(1,75)
         self.stage_driver.positioning_fine_absolute(2,75)
         self.stage_driver.positioning_fine_absolute(3,75)
         
-        stage_widget = StageWidget(self.stage_driver,"AttoCube")
+        stage_widget = StageWidget(self.stage_driver,self.stage_driver.name)
         
         layout.addWidget(stage_widget)
         main_widget.setLayout(layout)
         self.setCentralWidget(main_widget)
         
     def __del__(self):
-        #self.stage_driver.about_to_quit()
-        print('lalala')
+        self.stage_driver.free()
         
 create_dark_iconoir()
 
