@@ -13,6 +13,7 @@ from ndstorage import NDTiffDataset
 from gui.ui_utils import IconProvider,IntMultipleOfValidator, SteppingSpinBox
 from gui.ui_utils import create_iconized_button,update_iconized_button
 from gui.ui_utils import create_int_line_edit,create_combo_box
+from os.path import join
 
 ############################################################################### Image to NDTiff helper
 
@@ -702,6 +703,8 @@ class CameraWidget(QWidget):
     def clicked_save(self):
         file_name = self.filename.text()
         file_name = file_name.strip()
+        file_name = join( self.working_dir,file_name)
+        print(file_name)
         if file_name == '':
             return
         if not self.is_live:

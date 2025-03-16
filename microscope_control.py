@@ -2,8 +2,9 @@ import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QMainWindow
 from PyQt5.QtWidgets import QMessageBox, QSplitter, QGroupBox, QTabWidget
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout
-from PyQt5.QtWidgets import QLineEdit,QLabel
+from PyQt5.QtWidgets import QLineEdit,QLabel,QFileDialog
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon
 
 from hardware import DeviceManager
 from hardware import DummyLaser
@@ -114,8 +115,11 @@ class MainWindow(QMainWindow):
         folder_layout = QHBoxLayout()
         folder_layout.setContentsMargins(5,5,5,5)
         
+        from os import getcwd
         self.folder = QLineEdit()
+        self.set_folder( getcwd() )
         folder_button = create_iconized_button(icon_prov.folder,tooltip='Select folder...')
+        folder_button.clicked.connect(lambda: self.set_folder( QFileDialog.getExistingDirectory(self,'Select working folder') ) )
         
         folder_layout.addWidget(QLabel('Working directory: '),0)
         folder_layout.addWidget(self.folder,1)
@@ -140,6 +144,15 @@ class MainWindow(QMainWindow):
         widget.setLayout(layout)
         
         return widget
+    
+    def set_folder(self,working_dir):
+        if working_dir:
+            self.folder.setText(working_dir)
+            self.update_folder()
+        
+    def update_folder(self):
+        self.main_cam_widget.working_dir = self.folder.text()
+        self.aux_cam_widget.working_dir = self.folder.text()
     
     def _focus_lock(self):
         widget = QWidget()
@@ -245,8 +258,8 @@ class MainWindow(QMainWindow):
 app = QApplication.instance()  # Check if QApplication is already running
 if not app:  
     app = QApplication(sys.argv)
-
 qtmodern.styles.dark(app)
+app.setWindowIcon( QIcon('resources/microscope.svg') )
 
 icon_prov = IconProvider()
 icon_prov.load_dark_mode()
