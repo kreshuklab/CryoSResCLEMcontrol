@@ -55,7 +55,7 @@ class DummyLaser(Device):
 
 from microscope.lights.toptica import TopticaiBeam
 
-class TopticaIBeamLaser(QThread):
+class TopticaIBeamLaser(Device):
     
     ################################################################### Signals
     
@@ -64,19 +64,20 @@ class TopticaIBeamLaser(QThread):
     ############################################################# CTOR and DTOR
     
     def __init__(self,dev_name:str,com_port:str='COM3'):
-        super().__init__(dev_name)
+        super().__init__(dev_name,'Laser','Toptica','iBeam')
         self.iBeam = TopticaiBeam(com_port)
         
         self.power_status = False
 
         self.power_value       = 0.0
-        self.power_value_range = (0.0,2.0)
+        self.power_value_range = (0.0,200.0)
         self.power_value_unit  = 'mW'
         self.power_value_step  = 0.01
     
     def free(self):
         self.set_power_value (None,0.0)
         self.set_power_status(None,False)
+        self.iBeam.shutdown()
         super().free()
     
     ############################################################### Power Value
@@ -117,32 +118,35 @@ class OmicronLaser_PycroManager(Device):
     def __init__(self,dev_name:str,cfg_file:str='\\omicron640nmLaser.cfg'):
         super().__init__(dev_name,'Laser','PycroManager','Omicron USB')
         
-        self.power_ratio       = 0.0
-        self.power_ratio_range = (0.0,1.0)
-        
+        self.power_value       = 0.0
+        self.power_value_range = (0.0,100.0)
+        self.power_value_unit  = '%'
+        self.power_value_step  = 0.01
+
         self.power_status = False
 
         mm_app_path = 'C:\\Program Files\\Micro-Manager-2.0\\'
         config_file = mm_app_path + cfg_file
-
+        
+        
         # Start the headless process (Java backend)
         start_headless(mm_app_path, config_file, python_backend=False)
         self.mmcore = Core()
         
     def free(self):
-        self.set_power_ratio (None,0.0)
+        self.set_power_value (None,0.0)
         self.set_power_status(None,False)
         super().free()
 
     ############################################################### Power Ratio
 
     @pyqtSlot(int,float)
-    def set_power_ratio(self,_subdevice_id:int,ratio:float):
-        self.power_ratio = min(max(ratio,self.power_ratio_range[0]),self.power_ratio_range[1])
-        self.mmcore.set_property('Omicron USB','Power Setpoint', self.power_ratio)
+    def set_power_value(self,_subdevice_id:int,value:float):
+        self.power_value = min(max(value,self.power_value_range[0]),self.power_value_range[1])
+        self.mmcore.set_property('Omicron USB','Power Setpoint', self.power_value)
         
-    def get_power_ratio(self,_subdevice_id:int) -> float:
-        return self.power_ratio
+    def get_power_value(self,_subdevice_id:int) -> float:
+        return self.power_value
     
     ############################################################## Power Status        
     
@@ -159,7 +163,6 @@ class OmicronLaser_PycroManager(Device):
 
 import microfpga.controller as _cl
 from microfpga.signals import LaserTriggerMode as _mode
-
 
 class MicroFPGALaser(Device):
     
@@ -182,8 +185,10 @@ class MicroFPGALaser(Device):
         
         self.power_status = [False,]
 
-        self.power_ratio       = [0.0,]
-        self.power_ratio_range = [(0.0,1.0),]
+        self.power_value       = [0.0,]
+        self.power_value_range = [(0.0,100.0),]
+        self.power_value_unit  = '%'
+        self.power_value_step  = 0.01
         
         self.channels_conf = [
             {'pwm': 2, 'laser': 0 },
@@ -191,7 +196,7 @@ class MicroFPGALaser(Device):
         
     def free(self):
         for dev_id in range(len(self.power_status)):
-            self.set_power_ratio (dev_id,0.0)
+            self.set_power_value (dev_id,0.0)
             self.set_power_status(dev_id,False)
         self._ufpga.disconnect()
         super().free()
@@ -199,22 +204,19 @@ class MicroFPGALaser(Device):
     ############################################################### Power Ratio
 
     @pyqtSlot(int,float)
-    def set_power_ratio(self,subdevice_id:int,ratio:float):
-        self.power_ratio[subdevice_id] = min(max(ratio,self.power_ratio_range[subdevice_id][0]),self.power_ratio_range[subdevice_id][1])
-        value = int( np.round(255.0*self.power_ratio[subdevice_id]) )
-        self._ufpga.set_pwm_state(self.channels_conf[subdevice_id]['pwm'],value)
+    def set_power_value(self,subdevice_id:int,value:float):
+        self.power_value[subdevice_id] = min(max(value,self.power_value_range[subdevice_id][0]),self.power_value_range[subdevice_id][1])
+        uint8_value = int( np.round(255.0*self.power_value[subdevice_id])/100.0 )
+        self._ufpga.set_pwm_state(self.channels_conf[subdevice_id]['pwm'],uint8_value)
         
-        
-        self.power_ratio = min(max(ratio,self.power_ratio_range[0]),self.power_ratio_range[1])
-        print(f'[{self.thread_id}] {self.full_name}: set_power_ratio({ratio})')
-        
-    def get_power_ratio(self,subdevice_id:int) -> float:
-        return self.power_ratio[subdevice_id]
+    def get_power_value(self,subdevice_id:int) -> float:
+        return self.power_value[subdevice_id]
     
     ############################################################## Power Status        
     
     @pyqtSlot(int,bool)
     def set_power_status(self,subdevice_id:int,status:bool):
+        print('sup: ',status)
         self.power_status[subdevice_id] = status
         on_or_off = _mode.MODE_ON if self.power_status[subdevice_id] else _mode.MODE_OFF
         self._ufpga._lasers[self.channels_conf[subdevice_id]['laser']].set_mode(on_or_off)

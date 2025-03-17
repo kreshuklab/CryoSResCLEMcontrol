@@ -36,7 +36,8 @@ class DummyFilterWheel(Device):
 
 from microscope.filterwheels.thorlabs import ThorlabsFilterWheel as _thorlabss
 
-class FilterWheel(QThread):
+class FilterWheel(Device):
+    # ToDo: Add blocking to wait for finish command
     
     ################################################################### Signals
     
@@ -47,8 +48,10 @@ class FilterWheel(QThread):
     def __init__(self,dev_name:str,com_port:str='COM8'):
         super().__init__(dev_name,'FilterWheel','Thorslab','FW')
         self.filterwheel = _thorlabss('COM8')
+        self.filterwheel.enable()
         
         self.num_pos = 6
+        self.pos     = 0
         self.get_position()
         
     def free(self):
@@ -59,12 +62,12 @@ class FilterWheel(QThread):
 
     @pyqtSlot(int)
     def set_position(self,pos:int):
-        self.num_pos = min(max(pos,0),self.num_pos)
-        self.filterwheel.position = self.num_pos
+        self.pos = min(max(pos,0),self.num_pos)
+        self.filterwheel.position = self.pos
         
     def get_position(self) -> int:
-        self.num_pos = self.filterwheel.position
-        return self.num_pos
+        self.pos = self.filterwheel.position
+        return self.pos
 
     
 

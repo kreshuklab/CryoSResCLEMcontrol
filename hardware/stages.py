@@ -91,7 +91,7 @@ class AttoCubeStage(Device):
         self.axis_x = self.axis_dict['x']
         self.axis_y = self.axis_dict['y']
         self.axis_z = self.axis_dict['z']
-        self.show_commands = True
+        self.show_commands = False
         
         self.com = Serial(com_port,baudrate,parity=serial.PARITY_NONE)
         self.disable_echo()
@@ -203,6 +203,7 @@ class AttoCubeStage(Device):
 
     def free(self):
         self.set_mode_ground()
+        # self.enable_echo()
         super().free()
 
 ############################################################################### AttoCom

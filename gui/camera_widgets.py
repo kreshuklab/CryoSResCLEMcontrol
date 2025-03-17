@@ -12,7 +12,7 @@ from core.utils import FixedSizeNumpyQueue,get_min_max_avg
 from ndstorage import NDTiffDataset
 from gui.ui_utils import IconProvider,IntMultipleOfValidator, SteppingSpinBox
 from gui.ui_utils import create_iconized_button,update_iconized_button
-from gui.ui_utils import create_int_line_edit,create_combo_box
+from gui.ui_utils import create_int_line_edit,create_combo_box,create_doublespinbox
 from os.path import join
 
 ############################################################################### Image to NDTiff helper
@@ -27,6 +27,8 @@ class ImageToNDTiff(QObject):
         self.is_acquiring = False
         self.frame_count  = 0
         self.max_count    = 0
+        
+        self.dev_manager = None
     
     def save_snap(self,filename):
         if self._cam.frame_buffer.size > 0 and not self.is_acquiring:
@@ -50,6 +52,7 @@ class ImageToNDTiff(QObject):
                             'PixelSizeNM':    self._cam.pix_size_nm}
         self.current_file = NDTiffDataset(filename,summary_metadata=summary_metadata,writable=True)
         self.is_acquiring = True
+        self.frame_count  = 0
     
     def stop_acquisition(self):
         if not self.is_acquiring:
@@ -73,6 +76,13 @@ class ImageToNDTiff(QObject):
                 self.current_file = None
                 self.is_acquiring = False
                 self.finish_saving.emit()
+    
+    def wrap_file(self):
+        if self.current_file is not None:
+            self.current_file.finish()
+            del self.current_file
+            self.current_file = None
+            self.is_acquiring = False
     
     @pyqtSlot()
     def got_frame(self):
@@ -256,7 +266,7 @@ class CameraViewer(QGraphicsView):
     set_roi_up   = pyqtSignal()
     set_roi_down = pyqtSignal()
     
-    def __init__(self, qimg_provider, parent=None, useOpenGL=True, background='black'):
+    def __init__(self, qimg_provider, parent=None, useOpenGL=True, background='#202020'):
         
         QGraphicsScene.__init__(self,parent)
         
@@ -552,10 +562,15 @@ class CameraWidget(QWidget):
         
         self.snap_button = create_iconized_button(_g_icon_prov.camera      ,tooltip='Grab a frame')
         self.live_button = create_iconized_button(_g_icon_prov.video_camera,tooltip='Start acquisition')
-        buttons_layout.addStretch(0)
+        self.contrast_value = create_doublespinbox(0.1,100,0.1,0.1)
+        self.contrast_value.setSuffix('%')
+        self.contrast_value.editingFinished.connect(self.update_contrast)
+        
         buttons_layout.addWidget(self.snap_button)
         buttons_layout.addWidget(self.live_button)
         buttons_layout.addStretch(0)
+        buttons_layout.addWidget(QLabel('Auto-contrast ignoring: '))
+        buttons_layout.addWidget(self.contrast_value)
         buttons_widget.setLayout(buttons_layout)
         
         layout.addWidget(buttons_widget,0,0,1,1)
@@ -603,7 +618,7 @@ class CameraWidget(QWidget):
         roi_button_widget = QWidget()
         roi_button_layout = QHBoxLayout()
         roi_button_layout.setContentsMargins(0,0,0,0)
-        self.roi_button_show = create_iconized_button(_g_icon_prov.iris_scan          ,tooltip='Show ROI')
+        self.roi_button_show = create_iconized_button(_g_icon_prov.square             ,tooltip='Show ROI')
         self.roi_button_pick = create_iconized_button(_g_icon_prov.border_out         ,tooltip='Pick ROI center')
         self.roi_button_in   = create_iconized_button(_g_icon_prov.scale_frame_reduce ,tooltip='ROI in')
         self.roi_button_out  = create_iconized_button(_g_icon_prov.scale_frame_enlarge,tooltip='ROI out')
@@ -704,7 +719,6 @@ class CameraWidget(QWidget):
         file_name = self.filename.text()
         file_name = file_name.strip()
         file_name = join( self.working_dir,file_name)
-        print(file_name)
         if file_name == '':
             return
         if not self.is_live:
@@ -814,9 +828,21 @@ class CameraWidget(QWidget):
         return x,y,N
     
     @pyqtSlot()
+    def update_contrast(self):
+        value = self.contrast_value.value()
+        self.img2qimg.current_range = value/100
+        
+    def _scale_contrast_value(self,ratio):
+        value = self.contrast_value.value()
+        value = round( value/ratio, 2 )
+        self.contrast_value.setValue(value)
+        self.update_contrast()
+    
+    @pyqtSlot()
     def clicked_roi_in(self):
         x,y,N = self._get_roi_entries()
-        self.cam_handler.next_roi(x,y,N)
+        ratio = self.cam_handler.next_roi(x,y,N)
+        self._scale_contrast_value(ratio)
         if self.image.track_roi:
             self.image.disable_roi_tracking()
             update_iconized_button(self.roi_button_pick,_g_icon_prov.border_out,tooltip='Pick ROI center')
@@ -824,7 +850,8 @@ class CameraWidget(QWidget):
     @pyqtSlot()
     def clicked_roi_out(self):
         x,y,N = self._get_roi_entries()
-        self.cam_handler.previous_roi(x,y,N)
+        ratio = self.cam_handler.previous_roi(x,y,N)
+        self._scale_contrast_value(ratio)
     
     @pyqtSlot()
     def current_roi_show(self):
@@ -878,6 +905,7 @@ class CameraWidget(QWidget):
         self.roi_siz_modified()
     
     def free(self):
+        print('camera exiting...')
         if self.img2tiff_th and self.img2tiff_th.isRunning():
             self.img2tiff_th.quit()
             self.img2tiff_th.wait()  # Ensure thread stops before deleting

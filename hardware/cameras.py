@@ -1,5 +1,5 @@
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
-from PyQt5.QtCore import QRect, QTimer
+from PyQt5.QtCore import QRect
 from datetime import datetime
 import numpy as np
 
@@ -97,26 +97,37 @@ class _CameraDevice(QObject):
                 self.roi_list.append(entry)
                 
     def next_roi(self,center_x,center_y,box_size):
+        area_ratio = 1
         next_roi = self.current_roi + 1
         if next_roi < self.roi_levels:
             self.config_roi(next_roi,center_x,center_y,box_size)
+            cur_area = self.roi_list[self.current_roi]['rect'].width()*self.roi_list[self.current_roi]['rect'].height()    
+            new_area = self.roi_list[next_roi]['rect'].width()*self.roi_list[next_roi]['rect'].height()
+            print(cur_area,new_area)
+            area_ratio = new_area/cur_area
             if self.do_image:
                 self._update_configuration_function = self.set_roi_by_index
                 self._update_configuration_argument = (next_roi,)
                 self.stop_acquisition()
             else:
                 self.set_roi_by_index(next_roi)
+        return area_ratio
     
     def previous_roi(self,center_x,center_y,box_size):
+        area_ratio = 1
         previous_roi = self.current_roi - 1
         if previous_roi >= 0:
             self.config_roi(previous_roi,center_x,center_y,box_size)
+            cur_area = self.roi_list[self.current_roi]['rect'].width()*self.roi_list[self.current_roi]['rect'].height()    
+            new_area = self.roi_list[previous_roi]['rect'].width()*self.roi_list[previous_roi]['rect'].height()
+            area_ratio = new_area/cur_area
             if self.do_image:
                 self._update_configuration_function = self.set_roi_by_index
                 self._update_configuration_argument = (previous_roi,)
                 self.stop_acquisition()
             else:
                 self.set_roi_by_index(previous_roi)
+        return area_ratio
     
     def config_roi(self,roi_index,center_x,center_y,box_size):
         if (roi_index < len(self.roi_list)) and (roi_index>0):
@@ -212,12 +223,14 @@ class _CameraDevice(QObject):
 
 ############################################################################### DummyDevice
 
+from tifffile import imread as _imread
+from time import sleep as _sleep
+
 class DummyCamera(_CameraDevice):
     
     ############################################################# CTOR and DTOR
     
     def __init__(self,name,camera_index=0,exposure_time_ms=100):
-        
         self.raw_image = _imread('resources/SWTestbild_upscaled.tif')
         
         vendor = 'TestCamera'
@@ -429,9 +442,74 @@ if _should_use_dcam:
             self.camera.buf_release()
 
 else:
-    from tifffile import imread as _imread
-    from time import sleep as _sleep
-    
     HamamatsuCamera = DummyCamera
     
+############################################################################### PySpinCamera
+
+try:
+    import PySpin as pyspin
+    _should_use_pyspin = True
+except:
+    _should_use_pyspin = False
+    print('PySpin libraries not found, using a dummy camera')
+
+if _should_use_pyspin:
+    
+    class PySpinCamera(_CameraDevice):
+        
+        ############################################################# CTOR and DTOR
+        
+        def __init__(self,name,camera_index=0,exposure_time_ms=100,default_roi=0):
+            
+            self.cam_sys = pyspin.System.GetInstance()
+            self.cam_list = self.cam_sys.GetCameras()
+            self.camera = self.cam_list.GetByIndex(camera_index)
+            print( 'Using camera ' + self.camera.TLDevice.DeviceDisplayName.ToString() )
+            self.camera.Init()
+            
+            vendor = self.camera.dev_getstring(DCAM_IDSTR.VENDOR)
+            model  = self.camera.dev_getstring(DCAM_IDSTR.MODEL)
+            roi_levels = 2
+            
+            # Configuration of common parameter for cameras
+            super().__init__(name,vendor,model,roi_levels,
+                             pix_size_nm=136,
+                             exp_time_ms=exposure_time_ms,
+                             step_roi_pos=4,
+                             step_roi_siz=8)
+            
+            # Configure camera
+            # Load default
+            self.camera.UserSetSelector.SetValue(pyspin.UserSetSelector_Default)
+            self.camera.UserSetLoad()
+            
+            # Set acquisition mode
+            self.camera.AcquisitionMode.SetValue(pyspin.AcquisitionMode_Continuous)
+            
+            
+            # Set Manual Gain
+            self.camera.GainAuto.SetValue(pyspin.GainAuto_Off)
+            gain = 24 #min(self.camera.Gain.GetMax(),48)
+            self.camera.Gain.SetValue(gain)
+            print('Gain: %.2f dB'%self.camera.Gain.GetValue())
+    
+            # Set Pixel format
+            self.camera.PixelFormat.SetValue(pyspin.PixelFormat_Mono16)
+            
+            
+            self.set_roi_by_index(default_roi)
+            
+        def __del__(self):
+            self.camera.DeInit()
+            del self.camera
+            self.cam_list.Clear()
+            self.cam_sys.ReleaseInstance()
+
+else:
+    PySpinCamera = DummyCamera
+    
+
+
+
+
 # %%

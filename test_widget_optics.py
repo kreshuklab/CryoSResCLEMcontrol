@@ -8,12 +8,11 @@ from gui.ui_utils import IconProvider
 
 from hardware import DeviceManager
 from hardware import DummyLaser
-from hardware import DummyFilterWheel
-# from hardware import MicroFpga
+from hardware import MicroFPGALaser
 # from hardware import DummyLaser
-# from hardware import TopticaLaser
-# from hardware import OmicronLaser
-# from hardware import FilterWheel
+from hardware import TopticaIBeamLaser
+from hardware import OmicronLaser_PycroManager
+from hardware import FilterWheel
 # from hardware import LaserDeviceBase
 #from gui import LaserVerticalWidget,LaserHorizontalWidget,LaserWidget,PwmWidget,FilterWheelWidget
 from gui import LaserWidget,FilterWheelWidget,PwmWidget
@@ -46,12 +45,12 @@ class MainWindow(QMainWindow):
         main_widget = QWidget()
         layout = QVBoxLayout()
         
-        self.laser_405 = DummyLaser('DummyLaser405')
-        self.laser_488 = DummyLaser('DummyLaser488')
-        self.laser_561 = DummyLaser('DummyLaser561')
-        self.laser_640 = DummyLaser('DummyLaser640')
+        self.laser_405 = MicroFPGALaser('Laser405') # uFPGA
+        self.laser_488 = TopticaIBeamLaser('Laser488') # Toptica iBeam
+        self.laser_561 = DummyLaser('Laser561') # TBD
+        self.laser_640 = OmicronLaser_PycroManager('Laser640') # Omicron PycroManager
         
-        self.filterwheel = DummyFilterWheel('FilterWheel')
+        self.filterwheel = FilterWheel('FilterWheel')
         
         self.dev_manager.add(self.laser_405)
         self.dev_manager.add(self.laser_488)
