@@ -8,12 +8,12 @@ from PyQt5.QtGui import QIcon
 
 from hardware import DeviceManager
 from hardware import DummyLaser,MicroFPGALaser,TopticaIBeamLaser,OmicronLaser_PycroManager
-from hardware import FilterWheel
-from hardware import AttoCubeStage
+from hardware import FilterWheel, DummyFilterWheel
+from hardware import AttoCubeStage, DummyStage
 from hardware import HamamatsuCamera,DummyCamera
 
-from gui import StageWidget, IconProvider, CameraWidget, LaserWidget,FilterWheelWidget,PwmWidget
-from gui import create_iconized_button,create_spinbox,create_doublespinbox
+from gui import StageWidget,CameraWidget,LaserWidget,FilterWheelWidget,PwmWidget
+from gui import IconProvider,create_iconized_button,create_spinbox,create_doublespinbox
 
 from core import Worker
 from os.path import join
@@ -32,8 +32,9 @@ class MainWindow(QMainWindow):
     _start_z_coarse = pyqtSignal(int,int,str,str,float)
     _start_z_fine   = pyqtSignal(int,float,str,str,float)
     
-    def __init__(self):
+    def __init__(self,dummies=False):
         super().__init__()
+        self.dummies = dummies
 
         self.setWindowTitle("CryoSResCLEMcontrol")
         
@@ -41,7 +42,7 @@ class MainWindow(QMainWindow):
         
         ########################################################### TOP
         
-        self.main_cam   = HamamatsuCamera("Main_Camera")
+        self.main_cam   = DummyCamera("Aux_Camera") if self.dummies else HamamatsuCamera("Main_Camera")
         self.main_cam_widget = CameraWidget(self.main_cam,"Main")
         self.main_cam_widget.img2tiff.dev_manager = self.dev_manager
         
@@ -139,7 +140,7 @@ class MainWindow(QMainWindow):
         folder_button = create_iconized_button(icon_prov.folder,tooltip='Select folder...')
         folder_button.clicked.connect(lambda: self.set_folder( QFileDialog.getExistingDirectory(self,'Select working folder') ) )
         
-        self.focus_lock_button = QPushButton('Focus lock')
+        self.focus_lock_button = create_iconized_button(icon_prov.lock_z,'Start focus lock') #QPushButton('Focus lock')
         
         folder_layout.addWidget(QLabel('Working directory: '),0)
         folder_layout.addWidget(self.folder,1)
@@ -276,7 +277,7 @@ class MainWindow(QMainWindow):
     def _z_sweep_fine(self):
         
         widget = QWidget()
-        layout = QVBoxLayout()
+        layout = QHBoxLayout()
         layout.setContentsMargins(0,0,0,0)
         
         params_widget = QWidget()
@@ -373,11 +374,11 @@ class MainWindow(QMainWindow):
         self.folder_widget.setEnabled(True)    
     
     def _create_lasers(self):
-        laser_405 = MicroFPGALaser('Laser405') # uFPGA
-        laser_488 = TopticaIBeamLaser('Laser488') # Toptica iBeam
+        laser_405 = DummyLaser('Laser405') if self.dummies else MicroFPGALaser('Laser405') # uFPGA
+        laser_488 = DummyLaser('Laser488') if self.dummies else TopticaIBeamLaser('Laser488') # Toptica iBeam
         laser_561 = DummyLaser('Laser561')
         # laser_640 = DummyLaser('Laser640')
-        laser_640 = OmicronLaser_PycroManager('Laser640') # Omicron PycroManager
+        laser_640 = DummyLaser('Laser640') if self.dummies else OmicronLaser_PycroManager('Laser640') # Omicron PycroManager
         
         self.dev_manager.add(laser_405)
         self.dev_manager.add(laser_488)
@@ -416,7 +417,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(0,0,0,0)
         
-        filterwheel = FilterWheel('FilterWheel')
+        filterwheel = DummyFilterWheel('FilterWheel') if self.dummies else FilterWheel('FilterWheel')
         self.dev_manager.add(filterwheel)
         
         names  = ('520/35','530/30','585/40','617/50','692/50','none')
@@ -433,7 +434,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(3,3,3,3)
         
-        stage_driver = AttoCubeStage('Stage',com_port='COM5')
+        stage_driver = DummyStage('Stage') if self.dummies else AttoCubeStage('Stage',com_port='COM5')
         stage_driver.show_commands = True
         stage_driver.set_mode_mixed(1)
         stage_driver.set_mode_mixed(2)
@@ -459,11 +460,9 @@ app.setWindowIcon( QIcon('resources/microscope.svg') )
 icon_prov = IconProvider()
 icon_prov.load_dark_mode()
 
-try:
-    window = MainWindow()
+window = MainWindow(dummies=True)
 
-    window.show()
-    app.exec_()
-except Exception as e: print(e)
+window.show()
+app.exec_()
 
 # %%
