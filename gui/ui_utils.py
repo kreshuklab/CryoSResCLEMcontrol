@@ -125,11 +125,16 @@ def create_int_line_edit(val_min,val_max,placeholder_text='',validator=None):
 
 ############################################################################### Create QComboBox from list
 
-def create_combo_box(entries,current_entry):
+def create_combo_box(entries,current_entry,closer=False):
     combo_box = QComboBox()
     for entry in entries:
         combo_box.addItem(str(entry),entry)
-    current_index = entries.index(current_entry)
+    if closer:
+        temp_list = np.array(entries)
+        delta = np.abs( temp_list-current_entry )
+        current_index = delta.argmin()
+    else:
+        current_index = entries.index(current_entry)
     combo_box.setCurrentIndex(current_index)
     return combo_box
 

@@ -36,8 +36,6 @@ class _CameraDevice(QObject):
         self.done_acquiring = False
         
         self.set_exp_time(exp_time_ms)
-        self.init_roi_list()
-        self.set_roi_by_index(0)
         
         self._update_configuration_function = None
         self._update_configuration_argument = None
@@ -103,7 +101,6 @@ class _CameraDevice(QObject):
             self.config_roi(next_roi,center_x,center_y,box_size)
             cur_area = self.roi_list[self.current_roi]['rect'].width()*self.roi_list[self.current_roi]['rect'].height()    
             new_area = self.roi_list[next_roi]['rect'].width()*self.roi_list[next_roi]['rect'].height()
-            print(cur_area,new_area)
             area_ratio = new_area/cur_area
             if self.do_image:
                 self._update_configuration_function = self.set_roi_by_index
@@ -134,10 +131,8 @@ class _CameraDevice(QObject):
             x = center_x - box_size//2
             y = center_y - box_size//2
             self.roi_list[roi_index]['rect'].setRect(x,y,box_size,box_size)
-            print(self.roi_list)
     
     def set_roi_by_index(self,roi_index):
-        print('set_roi_by_index',roi_index)
         if roi_index < len(self.roi_list):
             if roi_index == 0:
                 self.set_full_roi()
@@ -168,8 +163,11 @@ class _CameraDevice(QObject):
             h = self.roi_list[0]['rect'].height()
             bin_factor = 2**roi_index
             box_size = min( w//bin_factor, h//bin_factor )
+            box_size = int(  self.step_roi_siz*np.round( box_size/self.step_roi_siz ) )
             x = w//2 - box_size//2
             y = h//2 - box_size//2
+            x = int(  self.step_roi_pos*np.round( x/self.step_roi_pos ) )
+            y = int(  self.step_roi_pos*np.round( y/self.step_roi_pos ) )
             entry = {'rect':QRect(x,y,box_size,box_size),'halo':0}
             return entry
         else:
@@ -238,6 +236,10 @@ class DummyCamera(_CameraDevice):
         roi_levels = 2
         
         super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms,step_roi_pos=4,step_roi_siz=8)
+        
+        self.init_roi_list()
+        self.set_roi_by_index(0)
+        
         self._internal_frame = np.zeros(self.raw_image.shape,np.uint16)
         self.x0 = 0
         self.y0 = 0
@@ -324,7 +326,7 @@ if _should_use_dcam:
         
         ############################################################# CTOR and DTOR
         
-        def __init__(self,name,camera_index=0,exposure_time_ms=100,default_roi=0):
+        def __init__(self,name,camera_index=0,exposure_time_ms=100,default_roi=0,step_roi_pos=8,step_roi_siz=8):
             
             assert Dcamapi.init(), "Cannot connect to DCAM (Hamamatsu) driver.\n Do you have one? or is it being used by another software?"
             self.camera = Dcam(camera_index)
@@ -340,6 +342,9 @@ if _should_use_dcam:
                              exp_time_ms=exposure_time_ms,
                              step_roi_pos=4,
                              step_roi_siz=8)
+            
+            self.init_roi_list()
+            self.set_roi_by_index(0)
             
             self.frame_timeout_ms = 1000
             self.set_cooler_on()
@@ -464,12 +469,14 @@ if _should_use_pyspin:
             self.cam_sys = pyspin.System.GetInstance()
             self.cam_list = self.cam_sys.GetCameras()
             self.camera = self.cam_list.GetByIndex(camera_index)
-            print( 'Using camera ' + self.camera.TLDevice.DeviceDisplayName.ToString() )
             self.camera.Init()
             
-            vendor = self.camera.dev_getstring(DCAM_IDSTR.VENDOR)
-            model  = self.camera.dev_getstring(DCAM_IDSTR.MODEL)
+            vendor = self.camera.DeviceVendorName.ToString()
+            model  = self.camera.DeviceModelName.ToString()
             roi_levels = 2
+            
+            self._exp_real_time_ms = 20
+            self._exp_buffer_size  = 0
             
             # Configuration of common parameter for cameras
             super().__init__(name,vendor,model,roi_levels,
@@ -486,16 +493,16 @@ if _should_use_pyspin:
             # Set acquisition mode
             self.camera.AcquisitionMode.SetValue(pyspin.AcquisitionMode_Continuous)
             
-            
-            # Set Manual Gain
+            # Set Gain
             self.camera.GainAuto.SetValue(pyspin.GainAuto_Off)
-            gain = 24 #min(self.camera.Gain.GetMax(),48)
+            gain = min(self.camera.Gain.GetMax(),24)
             self.camera.Gain.SetValue(gain)
-            print('Gain: %.2f dB'%self.camera.Gain.GetValue())
     
             # Set Pixel format
-            self.camera.PixelFormat.SetValue(pyspin.PixelFormat_Mono16)
+            self.set_uint16()
             
+            # Default Video Mode
+            self.set_video_mode('Mode1')
             
             self.set_roi_by_index(default_roi)
             
@@ -504,6 +511,141 @@ if _should_use_pyspin:
             del self.camera
             self.cam_list.Clear()
             self.cam_sys.ReleaseInstance()
+            
+        ########################################################## Extra Properties
+        
+        def set_uint16(self):
+            self.camera.PixelFormat.SetValue(pyspin.PixelFormat_Mono16)
+            
+        def get_video_mode_range(self):
+            return ['Mode0','Mode1']
+        
+        def set_video_mode(self,video_mode:str):
+            if self.do_image:
+                self._update_configuration_function = self.write_video_mode
+                self._update_configuration_argument = (video_mode,)
+                self.stop_acquisition()
+            else:
+                self.write_video_mode(video_mode)
+        
+        def write_video_mode(self,video_mode:str):
+            self.video_mode  = video_mode
+            nodemap          = self.camera.GetNodeMap()
+            video_mode_node  = pyspin.CEnumerationPtr(nodemap.GetNode("VideoMode"))
+            video_mode_entry = video_mode_node.GetEntryByName(self.video_mode).GetValue()
+            video_mode_node.SetIntValue(video_mode_entry)
+            
+            self.init_roi_list()
+            self.set_roi_by_index(0)
+            
+        def get_video_mode(self):
+            return self.video_mode
+            
+        
+        ############################################### Implement common properties
+        
+        def _get_full_chip_size(self):
+            w = self.camera.WidthMax.GetValue()
+            h = self.camera.HeightMax.GetValue()
+            entry = {'rect':QRect(0,0,int(w),int(h)),'halo':0}
+            return entry
+        
+        def set_full_roi(self):
+            self.set_roi( self.roi_list[0]['rect'] )
+            return True
+        
+        def config_roi(self,roi_index,center_x,center_y,box_size):
+            if (roi_index < len(self.roi_list)) and (roi_index>0):
+                max_w = self.camera.WidthMax.GetValue()
+                max_h = self.camera.HeightMax.GetValue()
+                
+                x = (max_w - center_x) - box_size//2
+                y = (max_h - center_y) - box_size//2
+                self.roi_list[roi_index]['rect'].setRect(x,y,box_size,box_size)
+            
+        def set_roi(self,roi:QRect):
+            self.camera.OffsetX.SetValue(0)
+            self.camera.OffsetY.SetValue(0)
+            w = int(roi.width())
+            h = int(roi.height())
+            x = int(roi.x())
+            y = int(roi.y())
+            self.camera.Width.SetValue(w)
+            self.camera.Height.SetValue(h)
+            self.camera.OffsetX.SetValue(x)
+            self.camera.OffsetY.SetValue(y)
+            return True
+        
+        def get_exp_time_range(self):
+            return np.arange(20,210,20).tolist()
+            
+        def write_exp_time(self):
+            self.camera.ExposureAuto.SetValue(pyspin.ExposureAuto_Off)
+            self._exp_real_time_ms = 20
+            self._exp_buffer_size  = int(np.ceil( self.exp_time_ms/self._exp_real_time_ms ))
+            exp_time_us = self._exp_real_time_ms * 1e3
+            exp_time_us = min(self.camera.ExposureTime.GetMax(),exp_time_us)
+            self.camera.ExposureTime.SetValue(exp_time_us)
+        
+        def read_exp_time(self):
+            exp_time_us = self.camera.ExposureTime.GetValue()
+            return self._exp_buffer_size * exp_time_us / 1e3
+        
+        ##################################################### Acquisition functions
+        
+        def _do_snap_frame(self):
+            w = self.camera.Width.GetValue()
+            h = self.camera.Height.GetValue()
+            self._internal_frame_buffer = np.zeros( (self._exp_buffer_size,int(h),int(w)), np.uint16 )
+            
+            self.camera.BeginAcquisition()
+            
+            for i in range(self._exp_buffer_size):
+                # Grab image
+                in_image = self.camera.GetNextImage()
+                in_w     = in_image.GetWidth()
+                in_h     = in_image.GetHeight()
+                self._internal_frame_buffer[i,:,:] = np.array(in_image.GetData()).reshape( (in_h,in_w) )
+                in_image.Release()
+                
+            self.frame_buffer = np.uint16(self._internal_frame_buffer.sum(axis=0).clip(0,65535))
+            self.frame_count  = 0
+            self.timestamp    = datetime.now()
+            self.frame_ready.emit()
+                
+            self.camera.EndAcquisition()
+            
+        @pyqtSlot()
+        def _do_acquire_frames(self,max_frames):
+            w = self.camera.Width.GetValue()
+            h = self.camera.Height.GetValue()
+            self._internal_frame_buffer = np.zeros( (self._exp_buffer_size,int(h),int(w)), np.uint16 )
+            
+            self.camera.BeginAcquisition()
+            
+            self.frame_count = 0
+            self.done_acquiring = False
+            
+            while self.do_image and not self.done_acquiring:
+                
+                for i in range(self._exp_buffer_size):
+                    # Grab image
+                    in_image = self.camera.GetNextImage()
+                    in_w     = in_image.GetWidth()
+                    in_h     = in_image.GetHeight()
+                    self._internal_frame_buffer[i,:,:] = np.array(in_image.GetData()).reshape( (in_h,in_w) )
+                    in_image.Release()
+                    
+                self.frame_buffer = self._internal_frame_buffer.sum(axis=0)
+                self.timestamp    = datetime.now()
+                self.frame_count += 1
+                self.frame_ready.emit()
+                
+                self.done_acquiring = (self.frame_count>=max_frames) and (max_frames>0)
+            
+            self.do_image = False
+            self.done_acquiring = True
+            self.camera.EndAcquisition()
 
 else:
     PySpinCamera = DummyCamera

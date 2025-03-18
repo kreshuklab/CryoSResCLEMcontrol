@@ -13,7 +13,7 @@ from ndstorage import NDTiffDataset
 from gui.ui_utils import IconProvider,IntMultipleOfValidator, SteppingSpinBox
 from gui.ui_utils import create_iconized_button,update_iconized_button
 from gui.ui_utils import create_int_line_edit,create_combo_box,create_doublespinbox
-from os.path import join
+from os.path import join,normpath
 
 ############################################################################### Image to NDTiff helper
 
@@ -70,9 +70,9 @@ class ImageToNDTiff(QObject):
                 image_metadata = {'timestamp': str(self._cam.timestamp),} 
                 self.current_file.put_image(image_coordinates, self._cam.frame_buffer, image_metadata)
                 self.frame_count = self.frame_count + 1
-            else:
+            
+            if self.frame_count == self.max_count:
                 self.current_file.finish()
-                del self.current_file
                 self.current_file = None
                 self.is_acquiring = False
                 self.finish_saving.emit()
@@ -80,7 +80,6 @@ class ImageToNDTiff(QObject):
     def wrap_file(self):
         if self.current_file is not None:
             self.current_file.finish()
-            del self.current_file
             self.current_file = None
             self.is_acquiring = False
     
@@ -95,7 +94,7 @@ class ImageToQImage(QObject):
     
     def __init__(self,camera_thread):
         super().__init__()
-        self.frame_y_flipped = np.zeros((0,0))
+        self.frame_fixed = np.zeros((0,0))
         self.current_range   = 0
         
         self._cam = camera_thread
@@ -112,28 +111,36 @@ class ImageToQImage(QObject):
         self.fps_timer = QElapsedTimer()
         
         self.ms_queue = FixedSizeNumpyQueue(n_elements=5)
+        
+        self.do_flip   = False
+        self.do_rot180 = False
     
     def set_outlier_range(self,outlier_range):
         self.current_range = outlier_range
     
     @pyqtSlot()
     def got_frame(self):
-        self.frame_y_flipped = np.float32( self._cam.frame_buffer )
+        if self.do_flip:
+            self.frame_fixed = np.float32( self._cam.frame_buffer[::-1,:] )
+        elif self.do_rot180:
+            self.frame_fixed = np.float32( self._cam.frame_buffer[::-1,::-1] )
+        else:
+            self.frame_fixed = np.float32( self._cam.frame_buffer )
         self.update_qimage()
         
     @pyqtSlot()
     def update_qimage(self):
         if self.current_range > 0:
-            v_min,v_max = np.quantile(self.frame_y_flipped.ravel(),(self.current_range,1-self.current_range))
+            v_min,v_max = np.quantile(self.frame_fixed.ravel(),(self.current_range,1-self.current_range))
         else:
-            v_min = self.frame_y_flipped.min()
-            v_max = self.frame_y_flipped.max()
+            v_min = self.frame_fixed.min()
+            v_max = self.frame_fixed.max()
         
-        self.v_min,self.v_max,self.v_avg = get_min_max_avg(self.frame_y_flipped)
+        self.v_min,self.v_max,self.v_avg = get_min_max_avg(self.frame_fixed)
         
-        self.h,self.w = self.frame_y_flipped.shape
+        self.h,self.w = self.frame_fixed.shape
         
-        buffer_f32  = (self.frame_y_flipped-v_min) / (v_max-v_min)
+        buffer_f32  = (self.frame_fixed-v_min) / (v_max-v_min)
         buffer_u16  = np.uint16( np.round( 65535.0*buffer_f32.clip(0,1) ) )
         
         self.v_fps = 0
@@ -417,7 +424,6 @@ class CameraWidget(QWidget):
         self.cam_handler = camera_handler
         self.cam_thread  = QThread()
         self.cam_handler.moveToThread(self.cam_thread)
-        
         self.img2qimg    = ImageToQImage(self.cam_handler)
         self.img2qimg.set_outlier_range(0.002)
         self.img2qimg_th = QThread(self)
@@ -428,11 +434,11 @@ class CameraWidget(QWidget):
         self.img2tiff.moveToThread(self.img2tiff_th)
         
         self.upper_bar = self.create_upper_bar(camera_name)
-        
+            
         self.image = CameraViewer(self.img2qimg)
         
         self.lower_panel = self.create_lower_panel()                
-               
+                   
         layout = QVBoxLayout()
         layout.addWidget(self.upper_bar  , stretch=0)
         layout.addWidget(self.image      , stretch=1)
@@ -460,8 +466,6 @@ class CameraWidget(QWidget):
         
         self.start_acquiring.connect(self.cam_handler.acquire_frames)
         
-        self.in_exp_time.editingFinished.connect( self.exposure_time_changed )
-        
         self.cam_handler.frame_ready.connect(self.img2qimg.got_frame)
         self.cam_handler.frame_ready.connect(self.img2tiff.got_frame)
         
@@ -478,7 +482,7 @@ class CameraWidget(QWidget):
         self.cam_thread.start()
         self.img2qimg_th.start()
         self.img2tiff_th.start()
-        
+    
     
     def create_upper_bar(self,camera_name):
         widget = QWidget()
@@ -572,6 +576,7 @@ class CameraWidget(QWidget):
         buttons_layout.addWidget(QLabel('Auto-contrast ignoring: '))
         buttons_layout.addWidget(self.contrast_value)
         buttons_widget.setLayout(buttons_layout)
+
         
         layout.addWidget(buttons_widget,0,0,1,1)
         layout.addWidget(self.create_saving_panel(),1,0,1,1)
@@ -662,9 +667,10 @@ class CameraWidget(QWidget):
             self.in_exp_time.setSingleStep(10)
             self.in_exp_time.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
             self.in_exp_time.setValue( int(exp_cur_value) )
+            self.in_exp_time.editingFinished.connect( self.exposure_time_changed )
         elif isinstance(exp_values, list):
-            # ToDo: Further test
-            self.in_exp_time = QComboBox(exp_values)
+            self.in_exp_time = create_combo_box(exp_values,exp_cur_value,closer=True)
+            self.in_exp_time.currentIndexChanged.connect(lambda idx: self.cam_handler.set_exp_time( float( self.in_exp_time.itemData(idx) ) ) )
         
         parameters_layout.addRow('Exposure time (ms):',self.in_exp_time)
         
@@ -673,6 +679,14 @@ class CameraWidget(QWidget):
         
         if hasattr(self.cam_handler,'gain'):
             parameters_layout.addRow('Gain (dB):',QLabel('Unsupported'))
+        
+        if hasattr(self.cam_handler,'video_mode'):
+            video_mode_list  = self.cam_handler.get_video_mode_range()
+            video_mode_value = self.cam_handler.get_video_mode()
+            if isinstance(video_mode_list, list):
+                self.in_video_mode = create_combo_box(video_mode_list,video_mode_value)
+                self.in_video_mode.currentIndexChanged.connect(lambda idx: self.cam_handler.set_video_mode( self.in_video_mode.itemData(idx) ) )
+                parameters_layout.addRow('Video Mode (binning)',self.in_video_mode)
         
         if hasattr(self.cam_handler,'cooler'):
             entries = self.cam_handler.get_cooler_range()
@@ -718,7 +732,7 @@ class CameraWidget(QWidget):
     def clicked_save(self):
         file_name = self.filename.text()
         file_name = file_name.strip()
-        file_name = join( self.working_dir,file_name)
+        file_name = normpath(join( self.working_dir,file_name))
         if file_name == '':
             return
         if not self.is_live:

@@ -10,13 +10,13 @@ from hardware import DeviceManager
 from hardware import DummyLaser,MicroFPGALaser,TopticaIBeamLaser,OmicronLaser_PycroManager
 from hardware import FilterWheel, DummyFilterWheel
 from hardware import AttoCubeStage, DummyStage
-from hardware import HamamatsuCamera,DummyCamera
+from hardware import HamamatsuCamera,PySpinCamera,DummyCamera
 
 from gui import StageWidget,CameraWidget,LaserWidget,FilterWheelWidget,PwmWidget
 from gui import IconProvider,create_iconized_button,create_spinbox,create_doublespinbox
 
 from core import Worker
-from os.path import join
+from os.path import join,normpath
 
 import qtmodern.styles
 
@@ -32,6 +32,9 @@ class MainWindow(QMainWindow):
     _start_z_coarse = pyqtSignal(int,int,str,str,float)
     _start_z_fine   = pyqtSignal(int,float,str,str,float)
     
+    restart_main_live = pyqtSignal()
+    restart_aux_live  = pyqtSignal()
+    
     def __init__(self,dummies=False):
         super().__init__()
         self.dummies = dummies
@@ -42,12 +45,13 @@ class MainWindow(QMainWindow):
         
         ########################################################### TOP
         
-        self.main_cam   = DummyCamera("Aux_Camera") if self.dummies else HamamatsuCamera("Main_Camera")
+        self.main_cam   = DummyCamera("Main_Camera") if self.dummies else HamamatsuCamera("Main_Camera")
         self.main_cam_widget = CameraWidget(self.main_cam,"Main")
         self.main_cam_widget.img2tiff.dev_manager = self.dev_manager
         
-        self.aux_cam   = DummyCamera("Aux_Camera")
+        self.aux_cam   = DummyCamera("Aux_Camera") if self.dummies else PySpinCamera("Aux_Camera")
         self.aux_cam_widget = CameraWidget(self.aux_cam,"Auxiliar")
+        self.aux_cam_widget.img2qimg.do_rot180 = True
         self.aux_cam_widget.img2tiff.dev_manager = self.dev_manager
         
         top_widget   = QWidget(self)
@@ -86,6 +90,9 @@ class MainWindow(QMainWindow):
         bottom_widget.setLayout(bottom_layout)
         
         ###########################################################s
+        
+        self.restart_main_live.connect( self.main_cam_widget.clicked_live )
+        self.restart_aux_live .connect( self.aux_cam_widget.clicked_live  )
         
         self.worker = Worker()
         self.worker.dev_manager = self.dev_manager
@@ -245,15 +252,13 @@ class MainWindow(QMainWindow):
         if self.z_coarse_use_main.isChecked():
             file = self.main_cam_widget.filename.text()
             if file:
-                main_file = join(self.folder.text(),file)
+                main_file = normpath(join(self.folder.text(),file))
         aux_file = ''
         if self.z_coarse_use_aux.isChecked():
             file = self.aux_cam_widget.filename.text()
             if file:
-                aux_file = join(self.folder.text(),file)
-        
-        
-        print(n_steps,volts,main_file,aux_file,delay)
+                aux_file = normpath(join(self.folder.text(),file))
+
         self._start_z_coarse.emit(n_steps,volts,main_file,aux_file,delay)
 
     @pyqtSlot()
@@ -272,7 +277,15 @@ class MainWindow(QMainWindow):
         self.wgt_pwm.setEnabled(True)
         self.wgt_filter_wheel.setEnabled(True)
         self.wgt_stage.setEnabled(True)
-        self.folder_widget.setEnabled(True)
+        self.folder_widget.setEnabled(True) 
+        
+        if self.main_was_live:
+           self.restart_main_live.emit() 
+           self.main_was_live = False
+
+        if self.aux_was_live:
+           self.restart_aux_live.emit()
+           self.aux_was_live = False
 
     def _z_sweep_fine(self):
         
@@ -317,9 +330,11 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def fine_z_start(self):
         if self.z_fine_use_main.isChecked():
+            self.main_was_live = self.main_cam.do_image
             self.main_cam_widget.stop_acquisition()
         
         if self.z_fine_use_aux.isChecked():
+            self.aux_was_live = self.aux_cam.do_image
             self.aux_cam_widget.stop_acquisition()
         
         self.z_fine_button.clicked.disconnect() 
@@ -345,14 +360,13 @@ class MainWindow(QMainWindow):
         if self.z_fine_use_main.isChecked():
             file = self.main_cam_widget.filename.text()
             if file:
-                main_file = join(self.folder.text(),file)
+                main_file = normpath( join(self.folder.text(),file) )
         aux_file = ''
         if self.z_fine_use_aux.isChecked():
             file = self.aux_cam_widget.filename.text()
             if file:
-                aux_file = join(self.folder.text(),file)
+                aux_file = normpath( join(self.folder.text(),file) )
         
-        print(n_steps,volts,main_file,aux_file,delay)
         self._start_z_fine.emit(n_steps,volts,main_file,aux_file,delay)
 
     @pyqtSlot()
@@ -371,7 +385,15 @@ class MainWindow(QMainWindow):
         self.wgt_pwm.setEnabled(True)
         self.wgt_filter_wheel.setEnabled(True)
         self.wgt_stage.setEnabled(True)
-        self.folder_widget.setEnabled(True)    
+        self.folder_widget.setEnabled(True) 
+        
+        if self.main_was_live:
+           self.restart_main_live.emit() 
+           self.main_was_live = False
+
+        if self.aux_was_live:
+           self.restart_aux_live.emit() 
+           self.aux_was_live = False
     
     def _create_lasers(self):
         laser_405 = DummyLaser('Laser405') if self.dummies else MicroFPGALaser('Laser405') # uFPGA
@@ -460,7 +482,7 @@ app.setWindowIcon( QIcon('resources/microscope.svg') )
 icon_prov = IconProvider()
 icon_prov.load_dark_mode()
 
-window = MainWindow(dummies=True)
+window = MainWindow(dummies=False)
 
 window.show()
 app.exec_()

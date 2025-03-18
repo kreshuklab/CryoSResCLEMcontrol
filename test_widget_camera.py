@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QMainWin
 from PyQt5.QtGui import QPainter, QColor
 from PyQt5.QtCore import Qt, QSize, pyqtSignal, QThread
 
-from hardware import HamamatsuCamera,DummyCamera
+from hardware import HamamatsuCamera,DummyCamera,PySpinCamera
 from gui import CameraWidget, IconProvider
 from core.utils import create_dark_iconoir
 
@@ -24,8 +24,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.hcam = HamamatsuCamera("Main_Camera")
+        # self.hcam = HamamatsuCamera("Main_Camera")
         # self.hcam = DummyCamera("Main_Camera")
+        try:
+            self.hcam = PySpinCamera("Aux_Camera")
+        except Exception as e: print('Ctor',e)
         
         self.setWindowTitle("Camera")
         self.setGeometry(1000, 100, 800, 800)
@@ -35,6 +38,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         
         self.hcam_widget = CameraWidget(self.hcam,"Main")
+        self.hcam_widget.img2qimg.do_rot180 = True
         
         layout.addWidget(self.hcam_widget)
         main_widget.setLayout(layout)

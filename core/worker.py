@@ -3,7 +3,6 @@ from time import sleep
 
 class Worker(QObject):
     done = pyqtSignal()
-    # message = pyqtSignal(str)
     
     def __init__(self,parent=None):
         super().__init__(parent)
@@ -49,9 +48,8 @@ class Worker(QObject):
     
     @pyqtSlot(int,int,str,str,float)
     def start_coarse_z_sweep(self,n_steps,step_volt,save_main,save_aux,post_z_wait):
-        # Number of steps
-        # step size (Z voltage +-)
         self.should_process = True
+        sleep(0.5)
     
         stage_dev = self.dev_manager.Stage
         direction = step_volt > 0
@@ -84,6 +82,8 @@ class Worker(QObject):
             
         self.should_process = False
         
+        sleep(0.5)
+        
         if save_main:
             self.main_saver.wrap_file()
             
@@ -95,6 +95,7 @@ class Worker(QObject):
     @pyqtSlot(int,float,str,str,float)
     def start_fine_z_sweep(self,n_steps,delta_v,save_main,save_aux,post_z_wait):
         self.should_process = True
+        sleep(0.5)
     
         stage_dev = self.dev_manager.Stage
         
@@ -108,7 +109,7 @@ class Worker(QObject):
             self.aux_saver.start_acquisition(save_aux)
             self.aux_cam.snap_frame()
             
-        for _ in range(n_steps):
+        for ite in range(n_steps):
             stage_dev.positioning_fine_delta(stage_dev.axis_z,delta_v)
             sleep(post_z_wait)
             
@@ -123,12 +124,14 @@ class Worker(QObject):
             
         self.should_process = False
         
+        sleep(0.5)
+        
         if save_main:
             self.main_saver.wrap_file()
             
         if save_aux:
             self.aux_saver.wrap_file()
-        
+            
         self.done.emit()
     
 
