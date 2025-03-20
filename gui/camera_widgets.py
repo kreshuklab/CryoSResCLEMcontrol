@@ -3,7 +3,7 @@ from PyQt5.QtCore import QElapsedTimer, QPoint, QRectF, QPointF
 from PyQt5.QtWidgets import QWidget, QOpenGLWidget
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QGraphicsItem
-from PyQt5.QtWidgets import QLabel, QLineEdit, QSpinBox, QComboBox
+from PyQt5.QtWidgets import QLabel, QLineEdit, QSpinBox
 from PyQt5.QtWidgets import QFrame
 from PyQt5.QtGui import QImage, QPixmap, QFont, QPalette, QColor, QTransform
 from PyQt5.QtGui import QPainter, QPen, QBrush, QWheelEvent
@@ -13,79 +13,113 @@ from ndstorage import NDTiffDataset
 from gui.ui_utils import IconProvider,IntMultipleOfValidator, SteppingSpinBox
 from gui.ui_utils import create_iconized_button,update_iconized_button
 from gui.ui_utils import create_int_line_edit,create_combo_box,create_doublespinbox
+from gui.ui_utils import StyledFrame
 from os.path import join,normpath
 
 ############################################################################### Image to NDTiff helper
 
 class ImageToNDTiff(QObject):
-    finish_saving = pyqtSignal()
+    finish_saving   = pyqtSignal()
+    saving_progress = pyqtSignal(str)
     
     def __init__(self,camera_thread):
         super().__init__()
         self._cam = camera_thread
         self.current_file = None
         self.is_acquiring = False
+        self.process      = True
         self.frame_count  = 0
         self.max_count    = 0
         
         self.dev_manager = None
     
-    def save_snap(self,filename):
-        if self._cam.frame_buffer.size > 0 and not self.is_acquiring:
-            summary_metadata = {'CameraUniqueId': self._cam.uid,
-                                'CameraVendor':   self._cam.vendor,
-                                'CameraModel':    self._cam.model,
-                                'PixelSizeNM':    self._cam.pix_size_nm}
-            dataset = NDTiffDataset(filename,summary_metadata=summary_metadata,writable=True)
-            image_coordinates = {'x': 0, 'y': 0} 
-            image_metadata = {'timestamp': str(self._cam.timestamp),} 
-            dataset.put_image(image_coordinates, self._cam.frame_buffer, image_metadata)
-            dataset.finish()
+    def enable_autosave(self):
+        self.process = True
+        
+    def disable_autosave(self):
+        self.process = False
     
-    def start_acquisition(self,filename):
+    def dataset_start(self,filename,num_frames=-1):
         if self.is_acquiring:
             return
         
-        summary_metadata = {'CameraUniqueId': self._cam.uid,
-                            'CameraVendor':   self._cam.vendor,
-                            'CameraModel':    self._cam.model,
-                            'PixelSizeNM':    self._cam.pix_size_nm}
-        self.current_file = NDTiffDataset(filename,summary_metadata=summary_metadata,writable=True)
         self.is_acquiring = True
+        self.max_count    = num_frames
         self.frame_count  = 0
-    
-    def stop_acquisition(self):
-        if not self.is_acquiring:
+        
+        summary_metadata  = {'CameraUniqueId': self._cam.uid,
+                             'CameraVendor':   self._cam.vendor,
+                             'CameraModel':    self._cam.model,
+                             'PixelSizeNM':    self._cam.pix_size_nm}
+        self.current_file = NDTiffDataset(filename,summary_metadata=summary_metadata,writable=True)
+        
+    def dataset_push_frame(self):
+        if self.current_file is None:
+            name = f'{self._cam.uid}: [{self._cam.vendor} - {self._cam.model}'
+            print(f'[{name}]: pushing frame to invalid dataset')
             return
         
-        self.frame_count  = self.max_count # Force to end
+        print
+        
+        if self.dev_manager and hasattr(self.dev_manager,'Stage'):
+            md_coord = {'x': self.dev_manager.Stage.x_steps,
+                        'y': self.dev_manager.Stage.y_steps,
+                        'z': self.dev_manager.Stage.z_steps}
+        else:
+            md_coord = {'x': 0, 'y': 0, 'z': 0}
+        md_img = {'timestamp': str(self._cam.timestamp),
+                  'frame_count': self.frame_count}
+        self.current_file.put_image(md_coord,self._cam.frame_buffer,md_img)
+        self.frame_count = self.frame_count + 1
+        
+    def dataset_check_done_state(self):
+        if self.max_count < 0:
+            return False
+        return self.frame_count >= self.max_count
+        
+    def dataset_finish(self):
+        if self.current_file is None:
+            return
+        
+        self.current_file.finish()
+        del self.current_file
+        self.current_file = None
+        self.max_count    = 0
+        self.frame_count  = 0
+        self.is_acquiring = False
+    
+    def save_snap(self,filename):
+        if self._cam.frame_buffer.size > 0:
+            self.dataset_start(filename)
+            self.dataset_push_frame()
+            self.dataset_finish()
+            self.saving_progress.emit('')
+            
+    def start_acquisition(self,filename,num_frames):
+        self.dataset_start(filename,num_frames)
+        if self.max_count > 0:
+            self.saving_progress.emit(f'{self.frame_count}/{self.max_count}')
+        else:
+            self.saving_progress.emit(f'{self.frame_count}')
+        
+    def stop_acquisition(self):
+        if self.is_acquiring:
+            self.frame_count = self.max_count # Force to end
     
     def push_frame(self):
-        if not self.is_acquiring:
-            return
-        
-        if self.current_file is not None:
-            if self.frame_count < self.max_count:
-                image_coordinates = {'x': 0, 'y': 0} 
-                image_metadata = {'timestamp': str(self._cam.timestamp),} 
-                self.current_file.put_image(image_coordinates, self._cam.frame_buffer, image_metadata)
-                self.frame_count = self.frame_count + 1
-            
-            if self.frame_count == self.max_count:
-                self.current_file.finish()
-                self.current_file = None
-                self.is_acquiring = False
+        if self.is_acquiring:
+            self.dataset_push_frame()
+            if self.dataset_check_done_state():
+                self.dataset_finish()
+                self.saving_progress.emit('')
                 self.finish_saving.emit()
-    
-    def wrap_file(self):
-        if self.current_file is not None:
-            self.current_file.finish()
-            self.current_file = None
-            self.is_acquiring = False
+            else:
+                self.saving_progress.emit(f'{self.frame_count}/{self.max_count}')
     
     @pyqtSlot()
     def got_frame(self):
-        self.push_frame()
+        if self.process:
+            self.push_frame()
 
 ############################################################################### Image to QImage helper
 
@@ -152,7 +186,6 @@ class ImageToQImage(QObject):
         mean_ms = self.ms_queue.mean()
         if mean_ms > 0:
             self.v_fps = 1000/mean_ms
-            
         
         self.qimage = QImage( buffer_u16.data, self.w, self.h, 2*self.w, QImage.Format.Format_Grayscale16 )
         self.frame_ready.emit()
@@ -422,8 +455,9 @@ class CameraWidget(QWidget):
         self.working_dir = ""
         
         self.cam_handler = camera_handler
-        self.cam_thread  = QThread()
+        self.cam_thread  = QThread(self)
         self.cam_handler.moveToThread(self.cam_thread)
+        
         self.img2qimg    = ImageToQImage(self.cam_handler)
         self.img2qimg.set_outlier_range(0.002)
         self.img2qimg_th = QThread(self)
@@ -433,9 +467,9 @@ class CameraWidget(QWidget):
         self.img2tiff_th = QThread(self)
         self.img2tiff.moveToThread(self.img2tiff_th)
         
-        self.upper_bar = self.create_upper_bar(camera_name)
-            
         self.image = CameraViewer(self.img2qimg)
+        
+        self.upper_bar = self.create_upper_bar(camera_name)
         
         self.lower_panel = self.create_lower_panel()                
                    
@@ -445,44 +479,26 @@ class CameraWidget(QWidget):
         layout.addWidget(self.lower_panel, stretch=0)
         self.setLayout(layout)
         
-        self.snap_button.clicked.connect(self.cam_handler.snap_frame)
-        self.live_button.clicked.connect(self.clicked_live)
-        self.save_button.clicked.connect(self.clicked_save)
-        
-        self.btn_zoom_full.clicked.connect(self.image.fitScale)
-        self.btn_zoom_in  .clicked.connect(self.image.zoom_in)
-        self.btn_zoom_out .clicked.connect(self.image.zoom_out)
-        
-        self.roi_button_show.pressed.connect(self.current_roi_show )
-        self.roi_button_show.released.connect(self.current_roi_hide )
-        
-        self.roi_button_in  .clicked.connect(self.clicked_roi_in )
-        self.roi_button_out .clicked.connect(self.clicked_roi_out)
-        self.roi_button_pick.clicked.connect(self.clicked_roi_pick)
         self.cam_handler.roi_set.connect( self.update_roi_state )
+        self.cam_handler.frame_ready.connect(self.img2qimg.got_frame)
+        self.cam_handler.frame_ready.connect(self.img2tiff.got_frame)
+        
         self.image.new_position.connect( self.got_new_roi_position )
         self.image.set_roi_up  .connect( self.roi_up   )
         self.image.set_roi_down.connect( self.roi_down )
         
         self.start_acquiring.connect(self.cam_handler.acquire_frames)
         
-        self.cam_handler.frame_ready.connect(self.img2qimg.got_frame)
-        self.cam_handler.frame_ready.connect(self.img2tiff.got_frame)
-        
-        self.roi_config_pos_x.editingFinished.connect(self.roi_pos_modified)
-        self.roi_config_pos_y.editingFinished.connect(self.roi_pos_modified)
-        self.roi_config_size .editingFinished.connect(self.roi_siz_modified)
-        
         self.roi_new_pos.connect( self.image.roi_new_pos )
         self.roi_new_siz.connect( self.image.roi_new_siz )
         
         self.img2qimg.frame_ready.connect( self.update_image )
         self.img2tiff.finish_saving.connect( self.saving_finished )
+        self.img2tiff.saving_progress.connect(lambda msg: self.frames.setText(msg))
         
         self.cam_thread.start()
         self.img2qimg_th.start()
         self.img2tiff_th.start()
-    
     
     def create_upper_bar(self,camera_name):
         widget = QWidget()
@@ -494,13 +510,17 @@ class CameraWidget(QWidget):
         stat_widget = QWidget()
         stat_layout = QHBoxLayout()
         
-        self.btn_zoom_full = create_iconized_button(_g_icon_prov.expand  ,tooltip='View full image')
-        self.btn_zoom_in   = create_iconized_button(_g_icon_prov.zoom_in ,tooltip='Zoom in')
-        self.btn_zoom_out  = create_iconized_button(_g_icon_prov.zoom_out,tooltip='Zoom out')
+        btn_zoom_full = create_iconized_button(_g_icon_prov.expand  ,tooltip='View full image')
+        btn_zoom_in   = create_iconized_button(_g_icon_prov.zoom_in ,tooltip='Zoom in')
+        btn_zoom_out  = create_iconized_button(_g_icon_prov.zoom_out,tooltip='Zoom out')
         
-        stat_layout.addWidget(self.btn_zoom_full)
-        stat_layout.addWidget(self.btn_zoom_in  )
-        stat_layout.addWidget(self.btn_zoom_out )
+        btn_zoom_full.clicked.connect(self.image.fitScale)
+        btn_zoom_in  .clicked.connect(self.image.zoom_in)
+        btn_zoom_out .clicked.connect(self.image.zoom_out)
+        
+        stat_layout.addWidget(btn_zoom_full)
+        stat_layout.addWidget(btn_zoom_in  )
+        stat_layout.addWidget(btn_zoom_out )
         
         stat_layout.addStretch()
 
@@ -557,7 +577,19 @@ class CameraWidget(QWidget):
     def create_lower_panel(self):
         
         widget = QWidget()
-        layout = QGridLayout()
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0,0,0,0)
+        
+        layout.addWidget( self.create_lower_left()   )
+        layout.addWidget( self.create_lower_middle() )
+        layout.addWidget( self.create_lower_right()  )
+        
+        widget.setLayout(layout)
+        return widget
+    
+    def create_lower_left(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
         layout.setContentsMargins(0,0,0,0)
         
         buttons_widget = QWidget()
@@ -565,33 +597,19 @@ class CameraWidget(QWidget):
         buttons_layout.setContentsMargins(0,0,0,0)
         
         self.snap_button = create_iconized_button(_g_icon_prov.camera      ,tooltip='Grab a frame')
-        self.live_button = create_iconized_button(_g_icon_prov.video_camera,tooltip='Start acquisition')
-        self.contrast_value = create_doublespinbox(0.1,100,0.1,0.1)
-        self.contrast_value.setSuffix('%')
-        self.contrast_value.editingFinished.connect(self.update_contrast)
+        self.snap_button.clicked.connect(self.cam_handler.snap_frame)
         
+        self.live_button = create_iconized_button(_g_icon_prov.video_camera,tooltip='Start acquisition')
+        self.live_button.clicked.connect(self.clicked_live)
+        
+        buttons_layout.addStretch()
         buttons_layout.addWidget(self.snap_button)
         buttons_layout.addWidget(self.live_button)
-        buttons_layout.addStretch(0)
-        buttons_layout.addWidget(QLabel('Auto-contrast ignoring: '))
-        buttons_layout.addWidget(self.contrast_value)
+        buttons_layout.addStretch()
         buttons_widget.setLayout(buttons_layout)
-
-        
-        layout.addWidget(buttons_widget,0,0,1,1)
-        layout.addWidget(self.create_saving_panel(),1,0,1,1)
-        layout.addWidget(self.create_configuration_panel(),0,1,2,1)
-        
-        widget.setLayout(layout)
-        return widget
-    
-    def create_saving_panel(self):
-        
-        widget = QWidget()
-        layout = QHBoxLayout()
         
         input_widget = QWidget()
-        input_layout = QFormLayout()
+        input_layout = QGridLayout()
         
         self.filename = QLineEdit()
         
@@ -600,23 +618,32 @@ class CameraWidget(QWidget):
         self.num_frames.setSingleStep(10)
         self.num_frames.setValue(0)
         
-        self.save_button = create_iconized_button(_g_icon_prov.floppy_disk_arrow_in,tooltip='Save frame/frames')
+        self.frames = QLabel('')
         
-        input_layout.addRow('Save to:',self.filename)
-        input_layout.addRow('Num. Frames:',self.num_frames)
+        self.save_button = create_iconized_button(_g_icon_prov.floppy_disk_arrow_in,tooltip='Save frame/frames')
+        self.save_button.clicked.connect(self.clicked_save)
+        
+        input_layout.addWidget(QLabel('Save to NDTiff:'),0,0)
+        input_layout.addWidget(self.filename,0,1)
+        input_layout.addWidget(self.save_button,0,2)
+        
+        input_layout.addWidget(QLabel('Num. Frames:'),1,0)
+        input_layout.addWidget(self.num_frames,1,1)
+        input_layout.addWidget(self.frames,1,2)
         
         input_widget.setLayout(input_layout)
         
+        layout.addWidget(buttons_widget)
         layout.addWidget(input_widget)
-        layout.addWidget(self.save_button)
         
         widget.setLayout(layout)
         return widget
     
-    def create_configuration_panel(self):
+    def create_lower_middle(self):
         
         widget = QWidget()
         layout = QVBoxLayout()
+        layout.setContentsMargins(0,0,0,0)
         
         ######## ROI Buttons
         
@@ -632,6 +659,12 @@ class CameraWidget(QWidget):
         roi_button_layout.addWidget(self.roi_button_in  )
         roi_button_layout.addWidget(self.roi_button_out )
         roi_button_widget.setLayout(roi_button_layout)
+        
+        self.roi_button_show.pressed.connect (self.current_roi_show )
+        self.roi_button_show.released.connect(self.current_roi_hide )
+        self.roi_button_pick.clicked.connect (self.clicked_roi_pick )
+        self.roi_button_in  .clicked.connect (self.clicked_roi_in   )
+        self.roi_button_out .clicked.connect (self.clicked_roi_out  )
         
         ######## ROI Fields
         
@@ -649,14 +682,41 @@ class CameraWidget(QWidget):
         roi_config_layout.addWidget(self.roi_config_size )
         roi_config_widget.setLayout(roi_config_layout)
         
+        self.roi_config_pos_x.editingFinished.connect(self.roi_pos_modified)
+        self.roi_config_pos_y.editingFinished.connect(self.roi_pos_modified)
+        self.roi_config_size .editingFinished.connect(self.roi_siz_modified)
+        
+        ######## ROI auto-contrast
+        
+        roi_contrast_widget = QWidget()
+        roi_contrast_layout = QHBoxLayout()
+        roi_contrast_layout.setContentsMargins(0,0,0,0)
+        
+        self.contrast_value = create_doublespinbox(0.1,100,0.1,0.1)
+        self.contrast_value.setSuffix('%')
+        self.contrast_value.editingFinished.connect(self.update_contrast)
+        
+        roi_contrast_layout.addWidget(QLabel('Auto-contrast full range ignoring: '))
+        roi_contrast_layout.addWidget(self.contrast_value)
+        roi_contrast_widget.setLayout(roi_contrast_layout)
+        
         ######## ROI update Fields and Buttons
         self.update_roi_state()
         
-        ######## Parameters
+        layout.addWidget(roi_button_widget)
+        layout.addWidget(roi_config_widget)
+        layout.addWidget(roi_contrast_widget)
         
-        parameters_widget = QWidget()
-        parameters_layout = QFormLayout()
-        parameters_layout.setContentsMargins(0,0,0,0)
+        widget.setLayout(layout)
+        return widget
+    
+    def create_lower_right(self):
+        
+        widget = StyledFrame()
+        # widget.setFrameShape(QFrame.StyledPanel)
+        # widget.setFrameShadow(QFrame.Raised)
+        layout = QFormLayout()
+        # layout.setContentsMargins(0,0,0,0)
         
         # Exposure time
         exp_values    = self.cam_handler.get_exp_time_range()
@@ -672,13 +732,7 @@ class CameraWidget(QWidget):
             self.in_exp_time = create_combo_box(exp_values,exp_cur_value,closer=True)
             self.in_exp_time.currentIndexChanged.connect(lambda idx: self.cam_handler.set_exp_time( float( self.in_exp_time.itemData(idx) ) ) )
         
-        parameters_layout.addRow('Exposure time (ms):',self.in_exp_time)
-        
-        if hasattr(self.cam_handler,'binning'):
-            parameters_layout.addRow('Binning:',QLabel('Unsupported'))
-        
-        if hasattr(self.cam_handler,'gain'):
-            parameters_layout.addRow('Gain (dB):',QLabel('Unsupported'))
+        layout.addRow('Exposure time (ms):',self.in_exp_time)
         
         if hasattr(self.cam_handler,'video_mode'):
             video_mode_list  = self.cam_handler.get_video_mode_range()
@@ -686,23 +740,17 @@ class CameraWidget(QWidget):
             if isinstance(video_mode_list, list):
                 self.in_video_mode = create_combo_box(video_mode_list,video_mode_value)
                 self.in_video_mode.currentIndexChanged.connect(lambda idx: self.cam_handler.set_video_mode( self.in_video_mode.itemData(idx) ) )
-                parameters_layout.addRow('Video Mode (binning)',self.in_video_mode)
+                layout.addRow('Video Mode (binning)',self.in_video_mode)
         
         if hasattr(self.cam_handler,'cooler'):
             entries = self.cam_handler.get_cooler_range()
             value   = self.cam_handler.get_cooler()
             self.cooler_state = create_combo_box(entries,value)
-            parameters_layout.addRow('Cooler state:',self.cooler_state)
+            layout.addRow('Cooler state:',self.cooler_state)
             self.cooler_state.setEnabled(False)
 
-        parameters_widget.setLayout(parameters_layout)
-        
-        ########
-        
-        layout.addWidget(roi_button_widget)
-        layout.addWidget(roi_config_widget)
-        layout.addWidget(parameters_widget)
         widget.setLayout(layout)
+        
         return widget
     
     @pyqtSlot()
@@ -732,17 +780,17 @@ class CameraWidget(QWidget):
     def clicked_save(self):
         file_name = self.filename.text()
         file_name = file_name.strip()
-        file_name = normpath(join( self.working_dir,file_name))
         if file_name == '':
             return
+        file_name = normpath(join( self.working_dir,file_name))
         if not self.is_live:
             self.img2tiff.save_snap(file_name)
         else:
-            self.img2tiff.max_count = self.num_frames.value()
-            self.img2tiff.start_acquisition(file_name)
-            self.filename.setEnabled(False)
-            self.num_frames.setEnabled(False)
-            self.save_button.setEnabled(False)
+            if self.num_frames.value() > 0:
+                self.img2tiff.start_acquisition(file_name,self.num_frames.value())
+                self.filename.setEnabled(False)
+                self.num_frames.setEnabled(False)
+                self.save_button.setEnabled(False)
     
     @pyqtSlot()
     def saving_finished(self):
@@ -849,6 +897,8 @@ class CameraWidget(QWidget):
     def _scale_contrast_value(self,ratio):
         value = self.contrast_value.value()
         value = round( value/ratio, 2 )
+        if value > 0.5:
+            value = 0
         self.contrast_value.setValue(value)
         self.update_contrast()
     
@@ -905,7 +955,6 @@ class CameraWidget(QWidget):
     @pyqtSlot()
     def roi_siz_modified(self):
         N = self.roi_config_size.value()
-        # halo = self.get_next_halo()?
         self.roi_new_siz.emit(N,0)
         
     @pyqtSlot()

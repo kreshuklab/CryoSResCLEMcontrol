@@ -182,6 +182,7 @@ class _CameraDevice(QObject):
     
     @pyqtSlot()
     def snap_frame(self):
+        print('A')
         if self.is_busy:
             print(f'{self.uid}: [{self.vendor} - {self.model}] Busy - Ignoring snap request.')
             return

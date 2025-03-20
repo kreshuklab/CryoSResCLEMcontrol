@@ -58,13 +58,13 @@ class Worker(QObject):
         stage_dev.set_voltage(stage_dev.axis_z,voltage)
         
         if save_main:
-            self.main_saver.max_count = n_steps + 1
-            self.main_saver.start_acquisition(save_main)
+            self.main_saver.disable_autosave()
+            self.main_saver.start_acquisition(save_main,n_steps + 1)
             self.main_cam.snap_frame()
             
         if save_aux:
-            self.aux_saver.max_count = n_steps + 1
-            self.aux_saver.start_acquisition(save_aux)
+            self.aux_saver.disable_autosave()
+            self.aux_saver.start_acquisition(save_aux,n_steps + 1)
             self.aux_cam.snap_frame()
             
         for _ in range(n_steps):
@@ -85,10 +85,10 @@ class Worker(QObject):
         sleep(0.5)
         
         if save_main:
-            self.main_saver.wrap_file()
+            self.main_saver.dataset_finish()
             
         if save_aux:
-            self.aux_saver.wrap_file()
+            self.aux_saver.dataset_finish()
         
         self.done.emit()
     
@@ -100,13 +100,11 @@ class Worker(QObject):
         stage_dev = self.dev_manager.Stage
         
         if save_main:
-            self.main_saver.max_count = n_steps + 1
-            self.main_saver.start_acquisition(save_main)
+            self.main_saver.start_acquisition(save_main,n_steps + 1)
             self.main_cam.snap_frame()
             
         if save_aux:
-            self.aux_saver.max_count = n_steps + 1
-            self.aux_saver.start_acquisition(save_aux)
+            self.aux_saver.start_acquisition(save_aux,n_steps + 1)
             self.aux_cam.snap_frame()
             
         for ite in range(n_steps):
@@ -115,9 +113,11 @@ class Worker(QObject):
             
             if save_main:
                 self.main_cam.snap_frame()
+                self.main_saver.dataset_push_frame()
             
             if save_aux:
                 self.aux_cam.snap_frame()
+                self.aux_saver.dataset_push_frame()
             
             if not self.should_process:
                 break
@@ -127,10 +127,12 @@ class Worker(QObject):
         sleep(0.5)
         
         if save_main:
-            self.main_saver.wrap_file()
+            self.main_saver.dataset_finish()
+            self.main_saver.enable_autosave()
             
         if save_aux:
-            self.aux_saver.wrap_file()
+            self.aux_saver.dataset_finish()
+            self.aux_saver.enable_autosave()
             
         self.done.emit()
     

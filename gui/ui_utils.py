@@ -1,8 +1,16 @@
 from PyQt5.QtCore import Qt,QSize
 from PyQt5.QtGui import QIcon, QFontMetrics,QIntValidator,QValidator
 from PyQt5.QtWidgets import QPushButton, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox
+from PyQt5.QtWidgets import QFrame
 from glob import glob
 import numpy as np
+
+############################################################################### StyledFrame
+
+class StyledFrame(QFrame):
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.setStyleSheet('StyledFrame { background-color: palette(alternate-base); border: 1px solid palette(midlight); }')
 
 ############################################################################### Icon Provider
 

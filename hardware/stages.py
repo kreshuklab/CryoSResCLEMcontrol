@@ -18,10 +18,19 @@ class DummyStage(Device):
         self.axis_z = self.axis_dict['z']
         self.show_commands = True
         
+        self.x_steps = 0
+        self.y_steps = 0
+        self.z_steps = 0
+        
     def free(self):
         self.set_mode_ground()
         super().free()
-        
+    
+    def set_position_counter(self,x=0,y=0,z=0):
+        self.x_steps = x
+        self.y_steps = y
+        self.z_steps = z
+    
     @pyqtSlot(int,int)
     def set_voltage(self,axis_id,volt_value):
         print(f'[{self.thread_id}] {self.full_name}: set_voltage({axis_id},{volt_value})')
@@ -95,6 +104,20 @@ class AttoCubeStage(Device):
         
         self.com = Serial(com_port,baudrate,parity=serial.PARITY_NONE)
         self.disable_echo()
+        
+        self.x_steps = 0
+        self.y_steps = 0
+        self.z_steps = 0
+
+    def free(self):
+        self.set_mode_ground()
+        # self.enable_echo()
+        super().free()
+    
+    def set_position_counter(self,x=0,y=0,z=0):
+        self.x_steps = x
+        self.y_steps = y
+        self.z_steps = z
     
     def _send_command(self,command):
         self.com.write( command.encode('ascii') )
@@ -200,9 +223,4 @@ class AttoCubeStage(Device):
     def wait_axis(self,axis_id):
         self._send_command( f'stepw {axis_id}\r\n' )
         self.done.emit(self.name)
-
-    def free(self):
-        self.set_mode_ground()
-        # self.enable_echo()
-        super().free()
 

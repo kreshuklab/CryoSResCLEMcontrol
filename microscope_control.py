@@ -482,7 +482,7 @@ app.setWindowIcon( QIcon('resources/microscope.svg') )
 icon_prov = IconProvider()
 icon_prov.load_dark_mode()
 
-window = MainWindow(dummies=False)
+window = MainWindow(dummies=True)
 
 window.show()
 app.exec_()
