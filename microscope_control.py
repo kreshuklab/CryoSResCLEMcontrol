@@ -2,7 +2,7 @@ import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QMainWindow
 from PyQt5.QtWidgets import QMessageBox, QSplitter, QGroupBox, QTabWidget
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
-from PyQt5.QtWidgets import QLineEdit,QLabel,QFileDialog,QPushButton,QCheckBox
+from PyQt5.QtWidgets import QLineEdit,QLabel,QFileDialog,QPushButton,QCheckBox,QComboBox
 from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QIcon
 
@@ -165,10 +165,25 @@ class MainWindow(QMainWindow):
         self.cmd_widget.addTab(self._z_sweep_coarse(),'Z-sweep coarse')
         self.cmd_widget.addTab(self._z_sweep_fine(),'Z-sweep fine')
         
+        self.cmd_widget.addTab(self._z_sweep(), 'Z-sweep')
+        
+        ###########################################################
+        
+        cmd_exec_widget = QWidget()
+        cmd_exec_layout = QHBoxLayout()
+        cmd_exec_layout.setContentsMargins(0,0,0,0)
+        
+        self.cmd_exec_button = create_iconized_button(icon_prov.play,'Start script')
+        
+        cmd_exec_layout.addStretch(1)
+        cmd_exec_layout.addWidget(self.cmd_exec_button,0)
+        cmd_exec_widget.setLayout(cmd_exec_layout)
+        
         ###########################################################
         
         layout.addWidget(self.folder_widget,0)
         layout.addWidget(self.cmd_widget,1)
+        layout.addWidget(cmd_exec_widget,1)
         
         widget.setLayout(layout)
         
@@ -182,7 +197,61 @@ class MainWindow(QMainWindow):
     def update_folder(self):
         self.main_cam_widget.working_dir = self.folder.text()
         self.aux_cam_widget.working_dir = self.folder.text()
+        
+    def _z_sweep(self):
+        widget = QWidget()
+        widget.setProperty('command','z-sweep')
+        self.zsweep_layout = QGridLayout()
+        self.zsweep_layout.setContentsMargins(0,0,0,0)
+        
+        self.zsweep_n_steps    = create_spinbox(1,100,20)
+        self.zsweep_type       = QComboBox()
+        
+        self.zsweep_use_main   = QCheckBox('Save Main camera')
+        self.zsweep_use_aux    = QCheckBox('Save Auxiliar camera.')
+        self.zsweep_delay      = create_doublespinbox(0,1,0.05,step=0.01)
+        
+        self.zsweep_use_main.setChecked(True)
+        self.zsweep_use_aux .setChecked(True)
+        self.zsweep_delay.setSuffix(' sec')
+        self.zsweep_type.addItem('[Coarse] Step size (volts +/-):','coarse')
+        self.zsweep_type.addItem('[Fine] Delta voltage (+/-):','fine')
+        self.zsweep_type.setCurrentIndex(0)
+        self.zsweep_type.currentIndexChanged.connect( self._z_sweep_change_type )
+        
+        self.zsweep_layout.addWidget(QLabel('Number of steps:'), 0,0)
+        self.zsweep_layout.addWidget(self.zsweep_n_steps, 0,1)
+        
+        self.zsweep_layout.addWidget(self.zsweep_type, 1,0)
+        if self.zsweep_type.currentIndex() == 0:
+            self.zsweep_volts = create_spinbox(-100,100,20)
+            self.zsweep_layout.addWidget(self.zsweep_volts, 1,1)
+        else:
+            self.zsweep_delta_v = create_doublespinbox(-15,15,0.1,step=0.1)
+            self.zsweep_layout.addWidget(self.zsweep_delta_v, 1,1)
+        
+        self.zsweep_layout.addWidget(self.zsweep_use_main, 0,2)
+        self.zsweep_layout.addWidget(self.zsweep_use_aux , 0,3)
+        
+        self.zsweep_layout.addWidget(QLabel('Delay step/save:'), 1,2)
+        self.zsweep_layout.addWidget(self.zsweep_delay, 1,3)
+        
+        widget.setLayout(self.zsweep_layout)
+        
+        return widget
     
+    @pyqtSlot(int)
+    def _z_sweep_change_type(self,index):
+        if index == 0:
+            self.zsweep_layout.removeWidget( self.zsweep_delta_v )
+            self.zsweep_volts = create_spinbox(-100,100,20)
+            self.zsweep_layout.addWidget( self.zsweep_volts,1,1 )
+        else:
+            self.zsweep_layout.removeWidget( self.zsweep_volts )
+            self.zsweep_delta_v = create_doublespinbox(-15,15,0.1,step=0.1)
+            self.zsweep_layout.addWidget( self.zsweep_delta_v,1,1 )
+        self.zsweep_layout.update()
+        
     def _z_sweep_coarse(self):
         widget = QWidget()
         layout = QHBoxLayout()
