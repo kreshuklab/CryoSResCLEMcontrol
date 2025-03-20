@@ -1,11 +1,9 @@
 from .common import Device
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import pyqtSignal, pyqtSlot
+from time import sleep
 import serial
-from serial import Serial
 
 ############################################################################### Dummy
-
-from time import sleep
 
 class DummyStage(Device):
     done = pyqtSignal(str)
@@ -73,10 +71,13 @@ class DummyStage(Device):
     
     @pyqtSlot(int,bool,int)
     def positioning_coarse(self,axis_id,is_up,n_steps):
+        axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
         if is_up:
             print(f'[{self.thread_id}] {self.full_name}: step_up({axis_id},{n_steps})')
+            self.step_counter[axis_name] = self.step_counter[axis_name] + int(n_steps)
         else:
             print(f'[{self.thread_id}] {self.full_name}: step_down({axis_id},{n_steps})')
+            self.step_counter[axis_name] = self.step_counter[axis_name] - int(n_steps)
 
     @pyqtSlot(int,float)
     def positioning_fine_delta(self,axis_id,delta_voltage):
@@ -102,22 +103,20 @@ class AttoCubeStage(Device):
         self.axis_z = self.axis_dict['z']
         self.show_commands = False
         
-        self.com = Serial(com_port,baudrate,parity=serial.PARITY_NONE)
+        self.com = serial.Serial(com_port,baudrate,parity=serial.PARITY_NONE)
         self.disable_echo()
         
-        self.x_steps = 0
-        self.y_steps = 0
-        self.z_steps = 0
-
+        self.step_counter = {'x':0,'y':0,'z':0}
+        
     def free(self):
         self.set_mode_ground()
         # self.enable_echo()
         super().free()
     
     def set_position_counter(self,x=0,y=0,z=0):
-        self.x_steps = x
-        self.y_steps = y
-        self.z_steps = z
+        self.step_counter['x'] = x
+        self.step_counter['y'] = y
+        self.step_counter['z'] = z
     
     def _send_command(self,command):
         self.com.write( command.encode('ascii') )
@@ -206,17 +205,21 @@ class AttoCubeStage(Device):
         
     @pyqtSlot(int,bool,int)
     def positioning_coarse(self,axis_id,is_up,n_steps):
+        axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
         if is_up:
             self._send_command( f'stepu {int(axis_id)} {int(n_steps)}\r\n' )
+            self.step_counter[axis_name] = self.step_counter[axis_name] + int(n_steps)
         else:
             self._send_command( f'stepd {int(axis_id)} {int(n_steps)}\r\n' )
-
+            self.step_counter[axis_name] = self.step_counter[axis_name] - int(n_steps)
+        self.wait_axis(axis_id)
+        
     @pyqtSlot(int,float)
     def positioning_fine_delta(self,axis_id,delta_voltage):
         current_voltage = self.read_offset_voltage( axis_id )
         new_voltage = max(current_voltage + delta_voltage,0)
         self._send_command( f'seta {axis_id} {new_voltage}\r\n' )
-    
+        
     def positioning_fine_absolute(self,axis_id,voltage):
         self._send_command( f'seta {axis_id} {voltage}\r\n' )
         

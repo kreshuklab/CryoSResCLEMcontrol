@@ -39,6 +39,12 @@ class FixedSizeNumpyQueue():
         else:
             return self._buffer.mean()
         
+    def median(self):
+        if self._occupancy < self._numel:
+            return 1.0
+        else:
+            return np.median(self._buffer)
+        
 ############################################################################### Numpy based fixed-sized queue
 
 #@jit(nopython=True,nogil=True,cache=True)

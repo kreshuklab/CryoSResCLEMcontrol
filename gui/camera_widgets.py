@@ -59,12 +59,10 @@ class ImageToNDTiff(QObject):
             print(f'[{name}]: pushing frame to invalid dataset')
             return
         
-        print
-        
         if self.dev_manager and hasattr(self.dev_manager,'Stage'):
-            md_coord = {'x': self.dev_manager.Stage.x_steps,
-                        'y': self.dev_manager.Stage.y_steps,
-                        'z': self.dev_manager.Stage.z_steps}
+            md_coord = {'x': self.dev_manager.Stage.step_counter['x'],
+                        'y': self.dev_manager.Stage.step_counter['y'],
+                        'z': self.dev_manager.Stage.step_counter['z']}
         else:
             md_coord = {'x': 0, 'y': 0, 'z': 0}
         md_img = {'timestamp': str(self._cam.timestamp),
@@ -692,7 +690,7 @@ class CameraWidget(QWidget):
         roi_contrast_layout = QHBoxLayout()
         roi_contrast_layout.setContentsMargins(0,0,0,0)
         
-        self.contrast_value = create_doublespinbox(0.1,100,0.1,0.1)
+        self.contrast_value = create_doublespinbox(0.0,100,0.1,0.1)
         self.contrast_value.setSuffix('%')
         self.contrast_value.editingFinished.connect(self.update_contrast)
         
@@ -791,6 +789,8 @@ class CameraWidget(QWidget):
                 self.filename.setEnabled(False)
                 self.num_frames.setEnabled(False)
                 self.save_button.setEnabled(False)
+            else:
+                self.img2tiff.save_snap(file_name)
     
     @pyqtSlot()
     def saving_finished(self):

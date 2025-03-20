@@ -179,17 +179,19 @@ class StageWidget(QWidget):
         widget = QWidget()
         layout = QFormLayout()
         
-        self.volts_x = create_spinbox(1,150,cur_val=20,step=5)
-        self.volts_y = create_spinbox(1,150,cur_val=20,step=5)
-        self.volts_z = create_spinbox(1,150,cur_val=20,step=5)
-        self.freq    = create_spinbox(1,2500,cur_val=1000,step=100)
-        self.n_steps = create_combo_box((1,2,3,5,7,10,15,20,40),1)
+        self.volts_x    = create_spinbox(1,150,cur_val=20,step=5)
+        self.volts_y    = create_spinbox(1,150,cur_val=20,step=5)
+        self.volts_z    = create_spinbox(1,150,cur_val=20,step=5)
+        self.freq       = create_spinbox(1,2500,cur_val=1000,step=100)
+        self.n_steps_xy = create_spinbox(1,50,cur_val=1,step=1)
+        self.n_steps_z  = create_spinbox(1,50,cur_val=1,step=1)
         
-        layout.addRow('Volts.X: '   ,self.volts_x)
-        layout.addRow('Volts.Y: '   ,self.volts_y)
-        layout.addRow('Volts.Z: '   ,self.volts_z)
-        layout.addRow('Frquency: '  ,self.freq   )
-        layout.addRow('Num. Steps: ',self.n_steps)
+        layout.addRow('Volts.X: '       ,self.volts_x   )
+        layout.addRow('Volts.Y: '       ,self.volts_y   )
+        layout.addRow('Volts.Z: '       ,self.volts_z   )
+        layout.addRow('Frquency: '      ,self.freq      )
+        layout.addRow('Num. Steps X/Y: ',self.n_steps_xy)
+        layout.addRow('Num. Steps Z: '  ,self.n_steps_z )
         
         widget.setLayout(layout)
         return widget
@@ -219,7 +221,10 @@ class StageWidget(QWidget):
     @pyqtSlot(str,int)
     def send_move_offset_command(self,axis_name,direction):
         if self._is_coarse():
-            self.send_move.emit(self.axis[axis_name],direction>0,self.n_steps.currentData())
+            if axis_name in ('x','y'):
+                self.send_move.emit(self.axis[axis_name],direction>0,self.n_steps_xy.value())
+            else:
+                self.send_move.emit(self.axis[axis_name],direction>0,self.n_steps_z.value())
         else:
             offset = np.sign(direction)*self.offsets[axis_name].value()
             self.send_ofst.emit(self.axis[axis_name],offset)

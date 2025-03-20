@@ -37,6 +37,9 @@ class _CameraDevice(QObject):
         
         self.set_exp_time(exp_time_ms)
         
+        # self.hotpix_list = list()
+        # self.hotpix_ref  = QRect()
+        
         self._update_configuration_function = None
         self._update_configuration_argument = None
         
@@ -83,6 +86,14 @@ class _CameraDevice(QObject):
     
     def write_exp_time(self): # To Be Implemented by Child
         print(f'write_exp_time not implemented ({self.uid}: {self.vendor} - {self.model})')
+    
+    ################################################################ Hot Pixels
+    
+    # def hotpix_ref_update(self,new_ref):
+    #     self.hotpix_ref.setRect(new_ref)
+    
+    # def hotpix_list_update(self,hotpix_list):
+    #     self.hotpix_list = list(hotpix_list)
     
     ####################################################################### ROI
     
@@ -137,8 +148,10 @@ class _CameraDevice(QObject):
             if roi_index == 0:
                 self.set_full_roi()
                 self.current_roi = roi_index
+                # self.hotpix_ref_update( self.roi_list[roi_index]['rect'] )
             elif self.set_roi( self.roi_list[roi_index]['rect'] ):
                 self.current_roi = roi_index
+                # self.hotpix_ref_update( self.roi_list[roi_index]['rect'] )
             else:
                 x = self.roi_list[roi_index]['rect'].x()
                 y = self.roi_list[roi_index]['rect'].y()
@@ -637,7 +650,7 @@ if _should_use_pyspin:
                     self._internal_frame_buffer[i,:,:] = np.array(in_image.GetData()).reshape( (in_h,in_w) )
                     in_image.Release()
                     
-                self.frame_buffer = self._internal_frame_buffer.sum(axis=0)
+                self.frame_buffer = np.uint16(self._internal_frame_buffer.sum(axis=0).clip(0,65535))
                 self.timestamp    = datetime.now()
                 self.frame_count += 1
                 self.frame_ready.emit()

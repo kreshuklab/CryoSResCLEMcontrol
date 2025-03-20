@@ -136,6 +136,6 @@ class Worker(QObject):
             
         self.done.emit()
     
-
+    #@pyqtSlot()
 
 
