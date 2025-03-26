@@ -482,6 +482,7 @@ if _should_use_pyspin:
             
             self.cam_sys = pyspin.System.GetInstance()
             self.cam_list = self.cam_sys.GetCameras()
+            assert camera_index < self.cam_list.GetSize(), f'PySpin (Chameleon): Trying to use camera with index {camera_index} when\nthere are only {self.cam_list.GetSize()} cameras available.'
             self.camera = self.cam_list.GetByIndex(camera_index)
             self.camera.Init()
             

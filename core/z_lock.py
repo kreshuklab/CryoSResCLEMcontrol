@@ -30,6 +30,8 @@ class ZLock(QObject):
         
         self.ratio_queue = FixedSizeNumpyQueue(5)
         
+        self.voltage_z = 20
+        
     def set_busy(self,busy:bool):
         self.busy = busy
     
@@ -165,16 +167,30 @@ class ZLock(QObject):
                 stage_dev.positioning_coarse(stage_dev.axis_z,False,1)
                 
             elif ratio < neg_fine_ratio:
-                print('Fine correction -')
-                step_size=delta_offset_step_min
-                self.positioning_fine_delta(stage_dev.axis_z,-step_size)
+                if stage_dev.offset_tracker['z'] <= 10:
+                    num_correcting_steps = int(np.floor((75-10)/self.voltage_z))
+                    stage_dev.positioning_coarse(stage_dev.axis_z,False,num_correcting_steps)
+                    stage_dev.positioning_fine_absolute(stage_dev.axis_z,75)
+                else:
+                    print('Fine correction -')
+                    step_size=delta_offset_step_min
+                    self.positioning_fine_delta(stage_dev.axis_z,-step_size)
                     
             elif ratio > pos_coarse_ratio:
                 print('Coarse correction +')
                 stage_dev.positioning_coarse(stage_dev.axis_z,True,1)
                 
             elif ratio > pos_fine_ratio:
-                print('Coarse correction +')
+                if stage_dev.offset_tracker['z'] <= (150-self.voltage_z-10):
+                    num_correcting_steps = int(np.floor((75-10)/self.voltage_z))
+                    stage_dev.positioning_coarse(stage_dev.axis_z,True,num_correcting_steps)
+                    stage_dev.positioning_fine_absolute(stage_dev.axis_z,75)
+                else:
+                    print('Fine correction -')
+                    step_size=delta_offset_step_min
+                    self.positioning_fine_delta(stage_dev.axis_z,-step_size)
+                
+                print('Fine correction +')
                 step_size=delta_offset_step_min
                 self.positioning_fine_delta(stage_dev.axis_z,step_size)
                 

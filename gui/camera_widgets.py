@@ -449,6 +449,7 @@ class CameraWidget(QWidget):
     def __init__(self,camera_handler,camera_name,*args,**kwargs):
         super().__init__(*args,**kwargs)
         
+        self.is_saving = False
         self.is_live = False
         self.working_dir = ""
         
@@ -745,7 +746,7 @@ class CameraWidget(QWidget):
             value   = self.cam_handler.get_cooler()
             self.cooler_state = create_combo_box(entries,value)
             layout.addRow('Cooler state:',self.cooler_state)
-            self.cooler_state.setEnabled(False)
+            # self.cooler_state.setEnabled(False)
 
         widget.setLayout(layout)
         
@@ -783,20 +784,24 @@ class CameraWidget(QWidget):
         file_name = normpath(join( self.working_dir,file_name))
         if not self.is_live:
             self.img2tiff.save_snap(file_name)
+        elif self.is_saving:
+            self.img2tiff.stop_acquisition()
         else:
             if self.num_frames.value() > 0:
+                self.is_saving = True
                 self.img2tiff.start_acquisition(file_name,self.num_frames.value())
                 self.filename.setEnabled(False)
                 self.num_frames.setEnabled(False)
-                self.save_button.setEnabled(False)
+                update_iconized_button(self.save_button,_g_icon_prov.square,tooltip='Stop acquisition')
             else:
                 self.img2tiff.save_snap(file_name)
     
     @pyqtSlot()
     def saving_finished(self):
+        self.is_saving = False
         self.filename.setEnabled(True)
         self.num_frames.setEnabled(True)
-        self.save_button.setEnabled(True)
+        update_iconized_button(self.save_button,_g_icon_prov.floppy_disk_arrow_in,tooltip='Save frame/frames')
         
     @pyqtSlot()
     def exposure_time_changed(self):

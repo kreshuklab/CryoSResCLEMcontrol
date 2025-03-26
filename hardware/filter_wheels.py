@@ -36,7 +36,7 @@ class DummyFilterWheel(Device):
 
 from microscope.filterwheels.thorlabs import ThorlabsFilterWheel as _thorlabss
 
-class FilterWheel(Device):
+class ThorlabsFilterWheel(Device):
     # ToDo: Add blocking to wait for finish command
     
     ################################################################### Signals

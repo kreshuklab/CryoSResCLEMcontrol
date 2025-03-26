@@ -103,6 +103,8 @@ class AttoCubeStage(Device):
         self.axis_z = self.axis_dict['z']
         self.show_commands = False
         
+        self.offset_tracker = {'x':0,'y':0,'z':0}
+        
         self.com = serial.Serial(com_port,baudrate,parity=serial.PARITY_NONE)
         self.disable_echo()
         
@@ -198,7 +200,7 @@ class AttoCubeStage(Device):
     def set_mode_ground(self,axis_id=None):
         if axis_id is None:
             for axis in self.axis_dict.values():
-                self.set_mode_mixed(axis)
+                self.set_mode_ground(axis)
         else:
             if self.read_mode(axis_id) != b'gnd':
                 self._send_command( f'setm {axis_id} gnd\r\n' )
@@ -216,11 +218,15 @@ class AttoCubeStage(Device):
         
     @pyqtSlot(int,float)
     def positioning_fine_delta(self,axis_id,delta_voltage):
+        axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
         current_voltage = self.read_offset_voltage( axis_id )
         new_voltage = max(current_voltage + delta_voltage,0)
+        self.offset_tracker[axis_name] = new_voltage
         self._send_command( f'seta {axis_id} {new_voltage}\r\n' )
         
     def positioning_fine_absolute(self,axis_id,voltage):
+        axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
+        self.offset_tracker[axis_name] = voltage
         self._send_command( f'seta {axis_id} {voltage}\r\n' )
         
     def wait_axis(self,axis_id):

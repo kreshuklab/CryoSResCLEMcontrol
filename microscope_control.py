@@ -2,7 +2,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QMainWindow
+from PyQt5.QtWidgets import QApplication, QWidget, QMainWindow, QSplashScreen
 from PyQt5.QtWidgets import QMessageBox, QSplitter, QGroupBox, QTabWidget
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
 from PyQt5.QtWidgets import QLineEdit,QLabel,QPushButton,QCheckBox,QComboBox
@@ -12,7 +12,7 @@ from PyQt5.QtGui import QIcon
 
 from hardware import DeviceManager
 from hardware import DummyLaser,MicroFPGALaser,TopticaIBeamLaser,OmicronLaser_PycroManager
-from hardware import FilterWheel, DummyFilterWheel
+from hardware import ThorlabsFilterWheel, DummyFilterWheel
 from hardware import AttoCubeStage, DummyStage
 from hardware import HamamatsuCamera,PySpinCamera,DummyCamera
 
@@ -27,9 +27,8 @@ import numpy as np
 import qtmodern.styles
 
 def custom_assert_handler(exc_type, exc_value, exc_traceback):
-    if exc_type == AssertionError:
-        QMessageBox.critical(None, "Assertion Failed", str(exc_value))
-        sys.exit(1)
+    QMessageBox.critical(None, str(exc_type.__name__), str(exc_value))
+    sys.exit(1)
 
 sys.excepthook = custom_assert_handler
 
@@ -41,7 +40,7 @@ class MainWindow(QMainWindow):
     restart_main_live = pyqtSignal()
     restart_aux_live  = pyqtSignal()
     
-    def __init__(self,dummies=False):
+    def __init__(self,splash:QSplashScreen,dummies=False):
         super().__init__()
         self.dummies = dummies
 
@@ -49,15 +48,64 @@ class MainWindow(QMainWindow):
         
         self.dev_manager = DeviceManager()
         
+        ########################################################### Create all Hardware
+        
+        message = 'Loading main camera...'
+        self.main_cam = DummyCamera("Main_Camera") if self.dummies else HamamatsuCamera("Main_Camera")
+        # self.main_cam = DummyCamera("Main_Camera")
+        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        
+        message = f'{message}\nLoading auxiliary camera...'
+        self.aux_cam  = DummyCamera("Aux_Camera") if self.dummies else PySpinCamera("Aux_Camera")
+        # self.aux_cam  = DummyCamera("Aux_Camera")
+        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        
+        message = f'{message}\nLoading stage controller...'
+        stage_driver = DummyStage('Stage') if self.dummies else AttoCubeStage('Stage',com_port='COM5')
+        stage_driver.show_commands = True
+        stage_driver.set_mode_mixed(1)
+        stage_driver.set_mode_mixed(2)
+        stage_driver.set_mode_mixed(3)
+        stage_driver.positioning_fine_absolute(1,75)
+        stage_driver.positioning_fine_absolute(2,75)
+        stage_driver.positioning_fine_absolute(3,75)
+        self.dev_manager.add(stage_driver)
+        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        
+        message = f'{message}\nLoading filter wheel...'
+        filterwheel = DummyFilterWheel('FilterWheel') if self.dummies else ThorlabsFilterWheel('FilterWheel')
+        self.dev_manager.add(filterwheel)
+        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        
+        message = f'{message}\nLoading laser 405nm...'
+        # laser_405 = DummyLaser('Laser405')
+        laser_405 = DummyLaser('Laser405') if self.dummies else MicroFPGALaser('Laser405') # uFPGA
+        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        
+        message = f'{message}\nLoading laser 488nm...'
+        # laser_488 = DummyLaser('Laser488')
+        laser_488 = DummyLaser('Laser488') if self.dummies else TopticaIBeamLaser('Laser488') # Toptica iBeam
+        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        
+        message = f'{message}\nLoading laser 561nm...'
+        laser_561 = DummyLaser('Laser561')
+        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        
+        message = f'{message}\nLoading laser 640nm...'
+        # laser_640 = DummyLaser('Laser640')
+        laser_640 = DummyLaser('Laser640') if self.dummies else OmicronLaser_PycroManager('Laser640') # Omicron PycroManager (Must be the last one on the list)
+        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        
+        self.dev_manager.add(laser_405)
+        self.dev_manager.add(laser_488)
+        self.dev_manager.add(laser_561)
+        self.dev_manager.add(laser_640)
+        
         ########################################################### TOP
         
-        self.main_cam   = DummyCamera("Main_Camera") if self.dummies else HamamatsuCamera("Main_Camera")
-        # self.main_cam   = DummyCamera("Main_Camera")
         self.main_cam_widget = CameraWidget(self.main_cam,"Main")
         self.main_cam_widget.img2tiff.dev_manager = self.dev_manager
         
-        self.aux_cam   = DummyCamera("Aux_Camera") if self.dummies else PySpinCamera("Aux_Camera")
-        # self.aux_cam   = DummyCamera("Aux_Camera")
         self.aux_cam_widget = CameraWidget(self.aux_cam,"Auxiliar")
         self.aux_cam_widget.img2qimg.do_rot180 = True
         self.aux_cam_widget.img2tiff.dev_manager = self.dev_manager
@@ -135,11 +183,13 @@ class MainWindow(QMainWindow):
         self.resize(2000,1200)
         
     def closeEvent(self, event):
-        self.main_cam.stop_acquisition()
-        self.aux_cam.stop_acquisition()
-        self.dev_manager.free()
-        self.main_cam_widget.free()
-        self.aux_cam_widget.free()
+        try:
+            self.main_cam.stop_acquisition()
+            self.aux_cam.stop_acquisition()
+            self.dev_manager.free()
+            self.main_cam_widget.free()
+            self.aux_cam_widget.free()
+        except Exception as e: print(e)
         event.accept()
         
     def _create_commands(self):
@@ -218,6 +268,7 @@ class MainWindow(QMainWindow):
     def z_lock_start(self):
         icon_prov = IconProvider()
         
+        self.z_locker.voltage_z = self.z_coarse_volts.value()
         self.z_locker.start()
         
         self.focus_lock_button.clicked.disconnect() 
@@ -297,7 +348,7 @@ class MainWindow(QMainWindow):
         params_widget = QWidget()
         params_layout = QFormLayout()
         
-        self.z_coarse_n_steps  = create_spinbox(1,100,20)
+        self.z_coarse_n_steps  = create_spinbox(1,200,20)
         self.z_coarse_volts    = create_spinbox(-100,100,20)
         self.z_coarse_use_main = QCheckBox('Save Main camera')
         self.z_coarse_use_aux  = QCheckBox('Save Auxiliar camera.')
@@ -402,7 +453,7 @@ class MainWindow(QMainWindow):
         params_widget = QWidget()
         params_layout = QFormLayout()
         
-        self.z_fine_n_steps  = create_spinbox(1,100,20)
+        self.z_fine_n_steps  = create_spinbox(1,200,20)
         self.z_fine_volts    = create_doublespinbox(-15,15,0.1,step=0.1)
         self.z_fine_use_main = QCheckBox('Save Main camera')
         self.z_fine_use_aux  = QCheckBox('Save Auxiliar camera.')
@@ -631,29 +682,16 @@ class MainWindow(QMainWindow):
                     fp.close()
     
     def _create_lasers(self):
-        # laser_405 = DummyLaser('Laser405')
-        # laser_488 = DummyLaser('Laser488')
-        laser_405 = DummyLaser('Laser405') if self.dummies else MicroFPGALaser('Laser405') # uFPGA
-        laser_488 = DummyLaser('Laser488') if self.dummies else TopticaIBeamLaser('Laser488') # Toptica iBeam
-        laser_561 = DummyLaser('Laser561')
-        # laser_640 = DummyLaser('Laser640')
-        # laser_640 = DummyLaser('Laser640')
-        laser_640 = DummyLaser('Laser640') if self.dummies else OmicronLaser_PycroManager('Laser640') # Omicron PycroManager
-        
-        self.dev_manager.add(laser_405)
-        self.dev_manager.add(laser_488)
-        self.dev_manager.add(laser_561)
-        self.dev_manager.add(laser_640)
         
         widget = QGroupBox()
         layout = QGridLayout()
         layout.setContentsMargins(0,0,0,0)
         
-        layout.addWidget(LaserWidget(laser_405,'405 nm','#C8B3E1',vertical=False),0,0)
-        layout.addWidget(LaserWidget(laser_488,'488 nm','#B7FFFA',vertical=False),0,1)
-        #layout.addWidget(LaserWidget(laser_561,'561 nm','#FDFC96',vertical=False),1,0)
-        layout.addWidget(LaserWidget(laser_561,'561 nm','#C6FF00',vertical=False),1,0)
-        layout.addWidget(LaserWidget(laser_640,'640 nm','#FF746C',vertical=False),1,1)
+        layout.addWidget(LaserWidget(self.dev_manager.Laser405,'405 nm','#C8B3E1',vertical=False),0,0)
+        layout.addWidget(LaserWidget(self.dev_manager.Laser488,'488 nm','#B7FFFA',vertical=False),0,1)
+        #layout.addWidget(LaserWidget(self.dev_manager.Laser561,'561 nm','#FDFC96',vertical=False),1,0)
+        layout.addWidget(LaserWidget(self.dev_manager.Laser561,'561 nm','#C6FF00',vertical=False),1,0)
+        layout.addWidget(LaserWidget(self.dev_manager.Laser640,'640 nm','#FF746C',vertical=False),1,1)
         
         widget.setTitle('Lasers')
         widget.setLayout(layout)
@@ -677,12 +715,9 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(0,0,0,0)
         
-        filterwheel = DummyFilterWheel('FilterWheel') if self.dummies else FilterWheel('FilterWheel')
-        self.dev_manager.add(filterwheel)
-        
         names  = ('520/35','530/30','585/40','617/50','692/50','none')
         colors = ('#80EF80','#E5F489','#FFEE8C','#FF9D37','#FF6060','#BEBEBE')
-        layout.addWidget(FilterWheelWidget(filterwheel,'Filter Wheel',names,colors,vertical=False))
+        layout.addWidget(FilterWheelWidget(self.dev_manager.FilterWheel,'Filter Wheel',names,colors,vertical=False))
         
         widget.setTitle('Filter Wheel')
         widget.setLayout(layout)
@@ -694,23 +729,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(3,3,3,3)
         
-        stage_driver = DummyStage('Stage') if self.dummies else AttoCubeStage('Stage',com_port='COM5')
-        stage_driver.show_commands = True
-        stage_driver.set_mode_mixed(1)
-        stage_driver.set_mode_mixed(2)
-        stage_driver.set_mode_mixed(3)
-        stage_driver.positioning_fine_absolute(1,75)
-        stage_driver.positioning_fine_absolute(2,75)
-        stage_driver.positioning_fine_absolute(3,75)
-        
-        self.dev_manager.add(stage_driver)
-        layout.addWidget(StageWidget(stage_driver,"AttoCube"))
+        layout.addWidget(StageWidget(self.dev_manager.Stage,"AttoCube"))
         
         widget.setTitle('Stage Controller')
         widget.setLayout(layout)
         
         return widget
-    
+
 app = QApplication.instance()  # Check if QApplication is already running
 if not app:  
     app = QApplication(sys.argv)
@@ -721,7 +746,13 @@ app.setWindowIcon( QIcon('resources/microscope.svg') )
 icon_prov = IconProvider()
 icon_prov.load_dark_mode()
 
-window = MainWindow(dummies=False)
+#splash = QSplashScreen(flags=Qt.WindowStaysOnTopHint)
+splash = QSplashScreen()
+splash.showMessage("Starting...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
+splash.show()
+
+window = MainWindow(splash,dummies=False)
+splash.finish(window)
 
 window.show()
 app.exec_()
