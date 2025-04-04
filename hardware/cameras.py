@@ -195,7 +195,6 @@ class _CameraDevice(QObject):
     
     @pyqtSlot()
     def snap_frame(self):
-        print('A')
         if self.is_busy:
             print(f'{self.uid}: [{self.vendor} - {self.model}] Busy - Ignoring snap request.')
             return
@@ -601,7 +600,7 @@ if _should_use_pyspin:
             exp_time_us = self._exp_real_time_ms * 1e3
             exp_time_us = min(self.camera.ExposureTime.GetMax(),exp_time_us)
             self.camera.ExposureTime.SetValue(exp_time_us)
-        
+            
         def read_exp_time(self):
             exp_time_us = self.camera.ExposureTime.GetValue()
             return self._exp_buffer_size * exp_time_us / 1e3
@@ -623,7 +622,7 @@ if _should_use_pyspin:
                 self._internal_frame_buffer[i,:,:] = np.array(in_image.GetData()).reshape( (in_h,in_w) )
                 in_image.Release()
                 
-            self.frame_buffer = np.uint16(self._internal_frame_buffer.sum(axis=0).clip(0,65535))
+            self.frame_buffer = np.uint16(self._internal_frame_buffer.mean(axis=0).clip(0,65535))
             self.frame_count  = 0
             self.timestamp    = datetime.now()
             self.frame_ready.emit()
@@ -651,7 +650,7 @@ if _should_use_pyspin:
                     self._internal_frame_buffer[i,:,:] = np.array(in_image.GetData()).reshape( (in_h,in_w) )
                     in_image.Release()
                     
-                self.frame_buffer = np.uint16(self._internal_frame_buffer.sum(axis=0).clip(0,65535))
+                self.frame_buffer = np.uint16(self._internal_frame_buffer.mean(axis=0).clip(0,65535))
                 self.timestamp    = datetime.now()
                 self.frame_count += 1
                 self.frame_ready.emit()

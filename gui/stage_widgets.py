@@ -1,5 +1,5 @@
 from PyQt5.QtCore import Qt, QObject, QThread, pyqtSignal, pyqtSlot
-from PyQt5.QtCore import QElapsedTimer, QPoint, QRectF, QPointF
+from PyQt5.QtCore import QElapsedTimer, QPoint, QRectF, QPointF, QTimer
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout, QSpacerItem, QTabWidget
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QOpenGLWidget, QGraphicsItem
 from PyQt5.QtWidgets import QPushButton, QLabel, QLineEdit, QSpinBox, QComboBox
@@ -27,7 +27,7 @@ class _DPadWidget(QWidget):
     def __init__(self,parent=None):
         super().__init__(parent)
         self.setFocusPolicy( Qt.FocusPolicy.StrongFocus )
-
+        
     def focusInEvent(self, event):
         self.got_focus.emit()
         super().focusInEvent(event)
@@ -75,8 +75,6 @@ class StageWidget(QWidget):
         super().__init__(parent)
         
         self.stage_device = stage_device
-        # self.stage_thread = QThread(self)
-        # self.stage_device.moveToThread(self.stage_thread)
         
         self.axis = {'x':2, 'y':1, 'z':3}
         self.dpad_widget = self._create_d_pad()
@@ -108,6 +106,8 @@ class StageWidget(QWidget):
         self.btn_z_neg.released.connect(lambda: self.send_command.emit('z',-1))
         self.btn_z_pos.released.connect(lambda: self.send_command.emit('z', 1))
         
+        self.btn_reset.released.connect( self.stage_device.reset_configuration )
+        
         self.send_command.connect(self.send_move_offset_command)
         self.dpad_widget.send_command.connect(self.send_move_offset_command)
         
@@ -121,12 +121,6 @@ class StageWidget(QWidget):
         self.send_ofst.connect( self.stage_device.positioning_fine_delta )
         self.send_vltg.connect( self.stage_device.set_voltage            )
         self.send_freq.connect( self.stage_device.set_frequencies        )
-        
-    def __del__(self):
-        print('hi?')
-        if self.stage_thread and self.stage_thread.isRunning():
-            self.stage_thread.quit()
-            self.stage_thread.wait()  # Ensure thread stops before deleting
     
     def _create_d_pad(self):
         self.btn_x_neg = create_iconized_button(_g_icon_prov.dot_arrow_x_neg)
@@ -146,6 +140,9 @@ class StageWidget(QWidget):
         self.btn_z_pos.setFocusPolicy( Qt.FocusPolicy.NoFocus )
         self.lbl_focus.setFocusPolicy( Qt.FocusPolicy.NoFocus )
         
+        self.btn_reset = QPushButton('Reset')
+        self.btn_reset.setFocusPolicy( Qt.FocusPolicy.NoFocus )
+        
         widget = _DPadWidget(self)
         layout = QGridLayout()
         layout.setContentsMargins(0,0,0,0)
@@ -155,6 +152,7 @@ class StageWidget(QWidget):
         layout.addWidget(self.btn_y_pos,1,2)
         layout.addWidget(self.btn_z_neg,3,5)
         layout.addWidget(self.btn_z_pos,1,5)
+        layout.addWidget(self.btn_reset,4,2)
         layout.addWidget(self.lbl_focus,4,6,Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignBottom)
         
         layout.setColumnStretch(0,1)
@@ -218,13 +216,21 @@ class StageWidget(QWidget):
     def _is_fine(self):
         return self.config_tabs.currentIndex() == 1
     
+    @pyqtSlot()
+    def reset_configuration(self):
+        self.send_vltg.emit(self.axis['x'], self.volts_x.value() )
+        self.send_vltg.emit(self.axis['y'], self.volts_y.value() )
+        self.send_vltg.emit(self.axis['z'], self.volts_z.value() )
+        self.send_freq.emit(self.freq.value())
+    
     @pyqtSlot(str,int)
     def send_move_offset_command(self,axis_name,direction):
         if self._is_coarse():
-            if axis_name in ('x','y'):
-                self.send_move.emit(self.axis[axis_name],direction>0,self.n_steps_xy.value())
-            else:
-                self.send_move.emit(self.axis[axis_name],direction>0,self.n_steps_z.value())
+            if not self.stage_device.is_busy:
+                if axis_name in ('x','y'):
+                    self.send_move.emit(self.axis[axis_name],direction>0,self.n_steps_xy.value())
+                else:
+                    self.send_move.emit(self.axis[axis_name],direction>0,self.n_steps_z.value())
         else:
             offset = np.sign(direction)*self.offsets[axis_name].value()
             self.send_ofst.emit(self.axis[axis_name],offset)

@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import QMessageBox, QSplitter, QGroupBox, QTabWidget
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
 from PyQt5.QtWidgets import QLineEdit,QLabel,QPushButton,QCheckBox,QComboBox
 from PyQt5.QtWidgets import QFileDialog,QTableWidget,QHeaderView,QTableWidgetItem
-from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal, QSettings, QByteArray
 from PyQt5.QtGui import QIcon
 
 from hardware import DeviceManager
@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
     _start_z_coarse = pyqtSignal(int,int,str,str,float)
     _start_z_fine   = pyqtSignal(int,float,str,str,float)
     
+    reset_stage_conf  = pyqtSignal()
     restart_main_live = pyqtSignal()
     restart_aux_live  = pyqtSignal()
     
@@ -45,6 +46,8 @@ class MainWindow(QMainWindow):
         self.dummies = dummies
 
         self.setWindowTitle("CryoSResCLEMcontrol")
+        
+        self.settings = QSettings("EMBL-IC", "CryoSResCLEMcontrol")
         
         self.dev_manager = DeviceManager()
         
@@ -63,12 +66,7 @@ class MainWindow(QMainWindow):
         message = f'{message}\nLoading stage controller...'
         stage_driver = DummyStage('Stage') if self.dummies else AttoCubeStage('Stage',com_port='COM5')
         stage_driver.show_commands = True
-        stage_driver.set_mode_mixed(1)
-        stage_driver.set_mode_mixed(2)
-        stage_driver.set_mode_mixed(3)
-        stage_driver.positioning_fine_absolute(1,75)
-        stage_driver.positioning_fine_absolute(2,75)
-        stage_driver.positioning_fine_absolute(3,75)
+        stage_driver.set_configuration(init_voltage_offset=65)
         self.dev_manager.add(stage_driver)
         splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
         
@@ -181,8 +179,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_widget)
         
         self.resize(2000,1200)
+        self.restoreGeometry(self.settings.value("window/geometry",QByteArray()))
         
     def closeEvent(self, event):
+        self.settings.setValue("window/geometry", self.saveGeometry())
+
         try:
             self.main_cam.stop_acquisition()
             self.aux_cam.stop_acquisition()
@@ -380,6 +381,12 @@ class MainWindow(QMainWindow):
     
     @pyqtSlot()
     def coarse_z_start(self):
+        
+        self.main_was_live = self.main_cam.do_image
+        self.aux_was_live  = self.aux_cam.do_image
+        
+        print(self.main_was_live,self.aux_was_live)
+        
         if self.z_coarse_use_main.isChecked():
             self.main_cam_widget.stop_acquisition()
         
@@ -437,13 +444,15 @@ class MainWindow(QMainWindow):
         self.folder_widget.setEnabled(True) 
         
         if self.main_was_live:
-           self.restart_main_live.emit() 
-           self.main_was_live = False
+            self.restart_main_live.emit() 
+            self.main_was_live = False
 
         if self.aux_was_live:
-           self.restart_aux_live.emit()
-           self.aux_was_live = False
-
+            self.restart_aux_live.emit()
+            self.aux_was_live = False
+        
+        self.reset_stage_conf.emit()
+        
     def _z_sweep_fine(self):
         
         widget = QWidget()
@@ -545,12 +554,14 @@ class MainWindow(QMainWindow):
         self.folder_widget.setEnabled(True) 
         
         if self.main_was_live:
-           self.restart_main_live.emit() 
-           self.main_was_live = False
+            self.restart_main_live.emit() 
+            self.main_was_live = False
 
         if self.aux_was_live:
-           self.restart_aux_live.emit() 
-           self.aux_was_live = False
+            self.restart_aux_live.emit() 
+            self.aux_was_live = False
+        
+        self.reset_stage_conf.emit()
     
     def _create_navigator(self):
         widget = QWidget()
@@ -715,7 +726,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(0,0,0,0)
         
-        names  = ('520/35','530/30','585/40','617/50','692/50','none')
+        names  = ('515/30','525/30','534/30','617/73','697/58','none')
         colors = ('#80EF80','#E5F489','#FFEE8C','#FF9D37','#FF6060','#BEBEBE')
         layout.addWidget(FilterWheelWidget(self.dev_manager.FilterWheel,'Filter Wheel',names,colors,vertical=False))
         
@@ -729,7 +740,9 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(3,3,3,3)
         
-        layout.addWidget(StageWidget(self.dev_manager.Stage,"AttoCube"))
+        stage_widget = StageWidget(self.dev_manager.Stage,"AttoCube")
+        self.reset_stage_conf.connect( stage_widget.reset_configuration )
+        layout.addWidget(stage_widget)
         
         widget.setTitle('Stage Controller')
         widget.setLayout(layout)

@@ -1,17 +1,19 @@
 from PyQt5.QtCore import QObject, QThread, pyqtSlot
 import warnings
 import numpy as np
+from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit
 from scipy.optimize import OptimizeWarning
+from scipy.sparse.linalg import svds
 
 from core import FixedSizeNumpyQueue
 
-def _GaussWOffset(x, a, x0, sigma, offset):
-    return a * np.exp(-(x - x0)**2 / (2 * sigma**2)) + offset
+def _GaussWLinear(x, a0, u0, s0, m0, o0):
+    return a0 * np.exp(-(x - u0)**2 / (2 * s0**2)) + m0*x + o0
 
 class ZLock(QObject):
     
-    def __init__(self,max_bead_spread=16,parent=None):
+    def __init__(self,max_bead_spread=10,parent=None):
         super().__init__(parent)
         
         self._thread = QThread()
@@ -23,6 +25,9 @@ class ZLock(QObject):
         
         self.dev_manager   = None
         self.aux_cam       = None
+        
+        self.ref_v = None
+        self.ref_h = None
         
         self.x_offset = int(0)
         self.y_offset = int(0)
@@ -60,20 +65,45 @@ class ZLock(QObject):
         self.ratio_queue.clear()
         
         self.should_process = True
+    
+    def _create_ref(self,shape,kernel):
+        tmp = np.zeros( shape, np.float32 )
+        tmp[ tmp.shape[0]//2, tmp.shape[1]//2 ] = 1
+        tmp = gaussian_filter(tmp,kernel)
+        TMP = np.fft.fft2( tmp, norm='ortho' )
+        return tmp,TMP
+
+    def _compute_references(self,frame):
+        if (self.ref_h is None) or ( self.ref_h.shape != frame.shape ):
+            self.ref_h,self.REF_H = self._create_ref(frame.shape,(0.75,2.5))
+        
+        if (self.ref_v is None) or ( self.ref_v.shape != frame.shape ):
+            self.ref_V,self.REF_V = self._create_ref(frame.shape,(2.5,0.75))
+            
+    def _compute_ratio(self,frame):
+        FRAME = np.fft.fft2( frame, norm='ortho' )
+        cc_h = np.fft.ifftshift( np.fft.ifft2(FRAME*self.REF_H,norm='ortho') ).real
+        cc_v = np.fft.ifftshift( np.fft.ifft2(FRAME*self.REF_V,norm='ortho') ).real
+        return cc_v.max()/cc_h.max()
         
     def _estimate_center_and_std(self,proj,axis):
-        init_values = (proj.max()-proj.min(),np.argmax(proj),4,proj.min())
+        if np.abs(proj.min()) > proj.max():
+            proj = -proj
+        off   = proj.min()
+        delta = proj.max() - off
+        init_values = (0.95*delta,axis[np.argmax(proj)],0.75,0.05*delta,off)
+        
         with warnings.catch_warnings():
             warnings.simplefilter("error", OptimizeWarning)  # Treat warnings as errors
             try:
-                popt,pcov = curve_fit(_GaussWOffset,axis,proj,init_values)
+                popt,pcov = curve_fit(_GaussWLinear,axis,proj,init_values)
                 if np.any(np.isnan(pcov)) or np.any(np.isinf(pcov)):
                     print("Curve fitting failed: covariance contains NaN or infinite values")
                     new_center = None
                     std = None
                 else:
-                    new_center = popt[1]
                     std = popt[2]
+                    new_center = popt[1]
             except OptimizeWarning:
                 print("Curve fitting failed: OptimizeWarning encountered")
                 new_center = None
@@ -93,39 +123,13 @@ class ZLock(QObject):
             if (frame.shape[0]<N) or (frame.shape[1]<N):
                 print(f'Invalid image size for focus lock: The image is {frame.shape[0]} by {frame.shape[1]}, and it must be larger than {N}.')
                 return
-        
-            M = 2*self.max_bead_spread
             
-            box_half    = frame.shape[0]//2
-            # box_quarter = frame.shape[0]//4
+            self._compute_references(frame)
+            ratio = self._compute_ratio(frame)
+            self.ratio_queue.push(ratio)
+            # self.process_ratio(self.ratio_queue.median())
             
-            x0 = box_half + self.x_offset - M
-            y0 = box_half + self.y_offset - M
-            
-            data = frame[ y0:y0+M, x0:x0+M ]
-            tx = np.arange(x0,x0+M)
-            ty = np.arange(y0,y0+M)
-            
-            self.x_center,x_std = self._estimate_center_and_std(data.mean(axis=0),tx)
-            self.y_center,y_std = self._estimate_center_and_std(data.mean(axis=1),ty)
-            
-            if self.x_center is not None:
-                self.x_center = int(self.x_center) - box_half
-            else:
-                self.x_center = int(0)
-                
-            if self.y_center is not None:
-                self.y_center = int(self.y_center) - box_half
-            else:
-                self.y_center = int(0)    
-            self.y_center = int(self.y_center) - box_half
-            
-            ratio = 0.0
-            if (x_std is not None) and (y_std is not None):
-                ratio = x_std/y_std
-                self.ratio_queue.push(ratio)
-                
-                self.process_ratio(self.ratio_queue.median())
+            print(self.ratio_queue.median(),ratio)
     
     def process_ratio(self,ratio):
         min_ratio_to_process = 0.2
@@ -158,41 +162,43 @@ class ZLock(QObject):
             
 # =============================================================================        
 
-        if ratio > min_ratio_to_process:
+        try:
             
-            stage_dev = self.dev_manager.Stage
-            
+            move_up = True
+
             if ratio < neg_coarse_ratio:
-                print('Coarse correction -')
-                stage_dev.positioning_coarse(stage_dev.axis_z,False,1)
                 
-            elif ratio < neg_fine_ratio:
-                if stage_dev.offset_tracker['z'] <= 10:
-                    num_correcting_steps = int(np.floor((75-10)/self.voltage_z))
-                    stage_dev.positioning_coarse(stage_dev.axis_z,False,num_correcting_steps)
-                    stage_dev.positioning_fine_absolute(stage_dev.axis_z,75)
-                else:
-                    print('Fine correction -')
-                    step_size=delta_offset_step_min
-                    self.positioning_fine_delta(stage_dev.axis_z,-step_size)
+                stage_dev = self.dev_manager.Stage
+                
+                if ratio < 0:
+                    print('Coarse correction -')
+                    stage_dev.positioning_coarse(stage_dev.axis_z,move_up,1)
                     
-            elif ratio > pos_coarse_ratio:
-                print('Coarse correction +')
-                stage_dev.positioning_coarse(stage_dev.axis_z,True,1)
-                
-            elif ratio > pos_fine_ratio:
-                if stage_dev.offset_tracker['z'] <= (150-self.voltage_z-10):
-                    num_correcting_steps = int(np.floor((75-10)/self.voltage_z))
-                    stage_dev.positioning_coarse(stage_dev.axis_z,True,num_correcting_steps)
-                    stage_dev.positioning_fine_absolute(stage_dev.axis_z,75)
-                else:
-                    print('Fine correction -')
-                    step_size=delta_offset_step_min
-                    self.positioning_fine_delta(stage_dev.axis_z,-step_size)
-                
-                print('Fine correction +')
-                step_size=delta_offset_step_min
-                self.positioning_fine_delta(stage_dev.axis_z,step_size)
+                # elif ratio < neg_fine_ratio:
+                #     if stage_dev.offset_tracker['z'] <= 10:
+                #         num_correcting_steps = int(np.floor((75-10)/self.voltage_z))
+                #         stage_dev.positioning_coarse(stage_dev.axis_z,False,num_correcting_steps)
+                #         stage_dev.positioning_fine_absolute(stage_dev.axis_z,75)
+                #     else:
+                #         print('Fine correction -')
+                #         step_size=delta_offset_step_min
+                #         stage_dev.positioning_fine_delta(stage_dev.axis_z,-step_size)
+                        
+                elif ratio > pos_coarse_ratio:
+                    print('Coarse correction +')
+                    stage_dev.positioning_coarse(stage_dev.axis_z,not move_up,1)
+                    
+                # elif ratio > pos_fine_ratio:
+                #     if stage_dev.offset_tracker['z'] <= (150-self.voltage_z-10):
+                #         num_correcting_steps = int(np.floor((75-10)/self.voltage_z))
+                #         stage_dev.positioning_coarse(stage_dev.axis_z,True,num_correcting_steps)
+                #         stage_dev.positioning_fine_absolute(stage_dev.axis_z,75)
+                #     else:
+                #         print('Fine correction -')
+                #         step_size=delta_offset_step_min
+                #         stage_dev.positioning_fine_delta(stage_dev.axis_z,-step_size)
+            
+        except Exception as e: print(e)
                 
                 
         

@@ -58,12 +58,12 @@ class Worker(QObject):
         stage_dev.set_voltage(stage_dev.axis_z,voltage)
         
         if save_main:
-            self.main_saver.disable_autosave()
+            self.main_saver.enable_autosave()
             self.main_saver.start_acquisition(save_main,n_steps + 1)
             self.main_cam.snap_frame()
             
         if save_aux:
-            self.aux_saver.disable_autosave()
+            self.aux_saver.enable_autosave()
             self.aux_saver.start_acquisition(save_aux,n_steps + 1)
             self.aux_cam.snap_frame()
             

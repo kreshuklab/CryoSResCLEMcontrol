@@ -3,7 +3,7 @@ from PyQt5.QtCore import QElapsedTimer, QPoint, QRectF, QPointF
 from PyQt5.QtWidgets import QWidget, QOpenGLWidget
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
 from PyQt5.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsPixmapItem, QGraphicsItem
-from PyQt5.QtWidgets import QLabel, QLineEdit, QSpinBox
+from PyQt5.QtWidgets import QLabel, QLineEdit, QSpinBox, QPushButton
 from PyQt5.QtWidgets import QFrame
 from PyQt5.QtGui import QImage, QPixmap, QFont, QPalette, QColor, QTransform
 from PyQt5.QtGui import QPainter, QPen, QBrush, QWheelEvent
@@ -31,6 +31,9 @@ class ImageToNDTiff(QObject):
         self.frame_count  = 0
         self.max_count    = 0
         
+        self.skip_counter = 0
+        self.skip_limit   = 0
+        
         self.dev_manager = None
     
     def enable_autosave(self):
@@ -46,7 +49,9 @@ class ImageToNDTiff(QObject):
         self.is_acquiring = True
         self.max_count    = num_frames
         self.frame_count  = 0
+        self.skip_counter = 0
         
+        print(f'Starting {filename}')
         summary_metadata  = {'CameraUniqueId': self._cam.uid,
                              'CameraVendor':   self._cam.vendor,
                              'CameraModel':    self._cam.model,
@@ -85,6 +90,8 @@ class ImageToNDTiff(QObject):
         self.max_count    = 0
         self.frame_count  = 0
         self.is_acquiring = False
+        self.skip_counter = 0
+        self.skip_limit   = 0
     
     def save_snap(self,filename):
         if self._cam.frame_buffer.size > 0:
@@ -93,7 +100,8 @@ class ImageToNDTiff(QObject):
             self.dataset_finish()
             self.saving_progress.emit('')
             
-    def start_acquisition(self,filename,num_frames):
+    def start_acquisition(self,filename,num_frames,skip_limit=0):
+        self.skip_limit = skip_limit
         self.dataset_start(filename,num_frames)
         if self.max_count > 0:
             self.saving_progress.emit(f'{self.frame_count}/{self.max_count}')
@@ -106,6 +114,12 @@ class ImageToNDTiff(QObject):
     
     def push_frame(self):
         if self.is_acquiring:
+            if self.skip_limit > 0:
+                if (self.skip_counter % self.skip_limit ) != 0:
+                    self.skip_counter += 1
+                    return
+
+            self.skip_counter += 1
             self.dataset_push_frame()
             if self.dataset_check_done_state():
                 self.dataset_finish()
@@ -172,9 +186,6 @@ class ImageToQImage(QObject):
         
         self.h,self.w = self.frame_fixed.shape
         
-        buffer_f32  = (self.frame_fixed-v_min) / (v_max-v_min)
-        buffer_u16  = np.uint16( np.round( 65535.0*buffer_f32.clip(0,1) ) )
-        
         self.v_fps = 0
         
         time_in_ms = self.fps_timer.restart()
@@ -185,7 +196,11 @@ class ImageToQImage(QObject):
         if mean_ms > 0:
             self.v_fps = 1000/mean_ms
         
+        buffer_f32  = (self.frame_fixed-v_min) / (v_max-v_min)
+        buffer_u16  = np.uint16( np.round( 65535.0*buffer_f32.clip(0,1) ) )
         self.qimage = QImage( buffer_u16.data, self.w, self.h, 2*self.w, QImage.Format.Format_Grayscale16 )
+        # buffer_u16  = np.uint8( np.round( 255.0*buffer_f32.clip(0,1) ) )
+        # self.qimage = QImage( buffer_u16.data, self.w, self.h, self.w, QImage.Format.Format_Grayscale8 )
         self.frame_ready.emit()
 
 ############################################################################### Custom GraphicsScene
@@ -356,7 +371,7 @@ class CameraViewer(QGraphicsView):
     def mousePressEvent(self,event):
         super().mousePressEvent(event)
         
-        if event.button() == Qt.MiddleButton:
+        if event.button() in  (Qt.MiddleButton,Qt.RightButton):
             self.do_pan = True
             self.start_pos = event.pos()
         
@@ -369,7 +384,7 @@ class CameraViewer(QGraphicsView):
     def mouseReleaseEvent(self,event):
         super().mousePressEvent(event)
         
-        if event.button() == Qt.MiddleButton:
+        if event.button() in  (Qt.MiddleButton,Qt.RightButton):
             self.do_pan = False
     
     def mouseMoveEvent(self,event):
@@ -616,8 +631,14 @@ class CameraWidget(QWidget):
         self.num_frames.setRange(0,2147483647)
         self.num_frames.setSingleStep(10)
         self.num_frames.setValue(0)
-        
         self.frames = QLabel('')
+        
+        self.skip_frames = QSpinBox()
+        self.skip_frames.setRange(1,2147483647)
+        self.skip_frames.setSingleStep(1)
+        self.skip_frames.setValue(1)
+        self.est_frame_time = QLabel('')
+        self.skip_frames.editingFinished.connect(self.skip_frames_changed)
         
         self.save_button = create_iconized_button(_g_icon_prov.floppy_disk_arrow_in,tooltip='Save frame/frames')
         self.save_button.clicked.connect(self.clicked_save)
@@ -629,6 +650,10 @@ class CameraWidget(QWidget):
         input_layout.addWidget(QLabel('Num. Frames:'),1,0)
         input_layout.addWidget(self.num_frames,1,1)
         input_layout.addWidget(self.frames,1,2)
+        
+        input_layout.addWidget(QLabel('Save each N frames:'),2,0)
+        input_layout.addWidget(self.skip_frames,2,1)
+        input_layout.addWidget(self.est_frame_time,2,2)
         
         input_widget.setLayout(input_layout)
         
@@ -695,7 +720,25 @@ class CameraWidget(QWidget):
         self.contrast_value.setSuffix('%')
         self.contrast_value.editingFinished.connect(self.update_contrast)
         
+        btn1 = QPushButton('None')
+        btn2 = QPushButton('0.01%')
+        btn3 = QPushButton('0.1%')
+        btn4 = QPushButton('1%')
+        btn5 = QPushButton('5%')
+        
+        btn1.released.connect(lambda: self.update_autocontrast(0))
+        btn2.released.connect(lambda: self.update_autocontrast(0.01))
+        btn3.released.connect(lambda: self.update_autocontrast(0.1))
+        btn4.released.connect(lambda: self.update_autocontrast(1))
+        btn5.released.connect(lambda: self.update_autocontrast(5))
+        
         roi_contrast_layout.addWidget(QLabel('Auto-contrast full range ignoring: '))
+        roi_contrast_layout.addStretch()
+        roi_contrast_layout.addWidget(btn1)
+        roi_contrast_layout.addWidget(btn2)
+        roi_contrast_layout.addWidget(btn3)
+        roi_contrast_layout.addWidget(btn4)
+        roi_contrast_layout.addWidget(btn5)
         roi_contrast_layout.addWidget(self.contrast_value)
         roi_contrast_widget.setLayout(roi_contrast_layout)
         
@@ -708,6 +751,10 @@ class CameraWidget(QWidget):
         
         widget.setLayout(layout)
         return widget
+    
+    def update_autocontrast(self,new_value):
+        self.contrast_value.setValue(new_value)
+        self.contrast_value.editingFinished.emit()
     
     def create_lower_right(self):
         
@@ -789,7 +836,8 @@ class CameraWidget(QWidget):
         else:
             if self.num_frames.value() > 0:
                 self.is_saving = True
-                self.img2tiff.start_acquisition(file_name,self.num_frames.value())
+                self.img2tiff.enable_autosave()
+                self.img2tiff.start_acquisition(file_name,self.num_frames.value(),self.skip_frames.value())
                 self.filename.setEnabled(False)
                 self.num_frames.setEnabled(False)
                 update_iconized_button(self.save_button,_g_icon_prov.square,tooltip='Stop acquisition')
@@ -802,9 +850,14 @@ class CameraWidget(QWidget):
         self.filename.setEnabled(True)
         self.num_frames.setEnabled(True)
         update_iconized_button(self.save_button,_g_icon_prov.floppy_disk_arrow_in,tooltip='Save frame/frames')
-        
+
+    @pyqtSlot()
+    def skip_frames_changed(self):
+        self.est_frame_time.setText(f'({self.in_exp_time.value()*self.skip_frames.value()} ms)')
+
     @pyqtSlot()
     def exposure_time_changed(self):
+        self.est_frame_time.setText(f'({self.in_exp_time.value()*self.skip_frames.value()} ms)')
         self.cam_handler.set_exp_time( int(self.in_exp_time.value()) )
     
     @pyqtSlot()

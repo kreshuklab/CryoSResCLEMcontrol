@@ -109,11 +109,26 @@ class AttoCubeStage(Device):
         self.disable_echo()
         
         self.step_counter = {'x':0,'y':0,'z':0}
+        self.is_busy = False
+        
+        self.init_voltage_offset = 65
         
     def free(self):
         self.set_mode_ground()
         # self.enable_echo()
         super().free()
+        
+    def set_configuration(self,init_voltage_offset=65):
+        self.init_voltage_offset = init_voltage_offset
+        self.set_mode_mixed()
+        self.positioning_fine_absolute(1,init_voltage_offset)
+        self.positioning_fine_absolute(2,init_voltage_offset)
+        self.positioning_fine_absolute(3,init_voltage_offset)
+    
+    @pyqtSlot()
+    def reset_configuration(self):
+        self.set_mode_ground()
+        self.set_configuration(self.init_voltage_offset)
     
     def set_position_counter(self,x=0,y=0,z=0):
         self.step_counter['x'] = x
@@ -126,6 +141,9 @@ class AttoCubeStage(Device):
             check = self.com.readline()
             check_val = check.strip().decode('ascii')
             if check_val == 'OK':
+                break
+            elif check_val == 'ERROR':
+                print('An error happened')
                 break
             else:
                 print('Ignoring ',check_val)
@@ -207,6 +225,7 @@ class AttoCubeStage(Device):
         
     @pyqtSlot(int,bool,int)
     def positioning_coarse(self,axis_id,is_up,n_steps):
+        self.is_busy = True
         axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
         if is_up:
             self._send_command( f'stepu {int(axis_id)} {int(n_steps)}\r\n' )
@@ -215,18 +234,23 @@ class AttoCubeStage(Device):
             self._send_command( f'stepd {int(axis_id)} {int(n_steps)}\r\n' )
             self.step_counter[axis_name] = self.step_counter[axis_name] - int(n_steps)
         self.wait_axis(axis_id)
+        self.is_busy = False
         
     @pyqtSlot(int,float)
     def positioning_fine_delta(self,axis_id,delta_voltage):
+        self.is_busy = True
         axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
         current_voltage = self.read_offset_voltage( axis_id )
         new_voltage = max(current_voltage + delta_voltage,0)
         self.offset_tracker[axis_name] = new_voltage
         self._send_command( f'seta {axis_id} {new_voltage}\r\n' )
+        self.is_busy = False
         
     def positioning_fine_absolute(self,axis_id,voltage):
-        axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
-        self.offset_tracker[axis_name] = voltage
+        try:
+            axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
+            self.offset_tracker[axis_name] = voltage
+        except Exception as e: print(e)
         self._send_command( f'seta {axis_id} {voltage}\r\n' )
         
     def wait_axis(self,axis_id):
