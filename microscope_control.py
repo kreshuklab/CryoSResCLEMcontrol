@@ -77,27 +77,28 @@ class MainWindow(QMainWindow):
         
         message = f'{message}\nLoading laser 405nm...'
         # laser_405 = DummyLaser('Laser405')
-        laser_405 = DummyLaser('Laser405') if self.dummies else MicroFPGALaser('Laser405') # uFPGA
+        # laser_405 = DummyLaser('Laser405') if self.dummies else MicroFPGALaser('Laser405') # uFPGA
+        laser_405 = DummyLaser('Laser405') if self.dummies else TopticaIBeamLaser('Laser405',com_port='COM13') # Toptica iBeam
         splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
         
         message = f'{message}\nLoading laser 488nm...'
         # laser_488 = DummyLaser('Laser488')
-        laser_488 = DummyLaser('Laser488') if self.dummies else TopticaIBeamLaser('Laser488') # Toptica iBeam
+        laser_488 = DummyLaser('Laser488') if self.dummies else TopticaIBeamLaser('Laser488',com_port='COM3') # Toptica iBeam
         splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
         
         message = f'{message}\nLoading laser 561nm...'
         laser_561 = DummyLaser('Laser561')
         splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
         
-        message = f'{message}\nLoading laser 640nm...'
+        #message = f'{message}\nLoading laser 640nm...'
         # laser_640 = DummyLaser('Laser640')
-        laser_640 = DummyLaser('Laser640') if self.dummies else OmicronLaser_PycroManager('Laser640') # Omicron PycroManager (Must be the last one on the list)
-        splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
+        #laser_640 = DummyLaser('Laser640') if self.dummies else OmicronLaser_PycroManager('Laser640') # Omicron PycroManager (Must be the last one on the list)
+        #splash.showMessage(message,Qt.AlignTop| Qt.AlignLeft, Qt.white)
         
         self.dev_manager.add(laser_405)
         self.dev_manager.add(laser_488)
         self.dev_manager.add(laser_561)
-        self.dev_manager.add(laser_640)
+        #self.dev_manager.add(laser_640)
         
         ########################################################### TOP
         
@@ -702,7 +703,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(LaserWidget(self.dev_manager.Laser488,'488 nm','#B7FFFA',vertical=False),0,1)
         #layout.addWidget(LaserWidget(self.dev_manager.Laser561,'561 nm','#FDFC96',vertical=False),1,0)
         layout.addWidget(LaserWidget(self.dev_manager.Laser561,'561 nm','#C6FF00',vertical=False),1,0)
-        layout.addWidget(LaserWidget(self.dev_manager.Laser640,'640 nm','#FF746C',vertical=False),1,1)
+        #layout.addWidget(LaserWidget(self.dev_manager.Laser640,'640 nm','#FF746C',vertical=False),1,1)
         
         widget.setTitle('Lasers')
         widget.setLayout(layout)
