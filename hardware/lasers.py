@@ -188,7 +188,7 @@ class MicroFPGALaser(Device):
         self._ufpga = _cl.MicroFPGA(known_device=com_index, # connectad at COM9
                                     use_camera=False,       # not using camera
                                     n_pwm=4,                # has 4 PWM channels
-                                    n_laser=1               # has 1 laser connected
+                                    n_laser=4               # has 1 laser connected
                                     )
         
         assert self._ufpga.is_connected(), f'Problem connecting to the FPGA ({self._ufpga.device})'
@@ -201,7 +201,7 @@ class MicroFPGALaser(Device):
         self.power_value_step  = 0.01
         
         self.channels_conf = [
-            {'pwm': 2, 'laser': 0 },
+            {'pwm': 3, 'laser': 3 },
             ]
         
     def free(self):

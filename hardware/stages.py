@@ -225,6 +225,8 @@ class AttoCubeStage(Device):
         
     @pyqtSlot(int,bool,int)
     def positioning_coarse(self,axis_id,is_up,n_steps):
+        if self.is_busy:
+            return
         self.is_busy = True
         axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
         if is_up:
@@ -238,6 +240,8 @@ class AttoCubeStage(Device):
         
     @pyqtSlot(int,float)
     def positioning_fine_delta(self,axis_id,delta_voltage):
+        if self.is_busy:
+            return
         self.is_busy = True
         axis_name = list( self.axis_dict.keys() )[ list(self.axis_dict.values()).index(axis_id) ]
         current_voltage = self.read_offset_voltage( axis_id )

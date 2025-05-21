@@ -13,7 +13,7 @@ def _GaussWLinear(x, a0, u0, s0, m0, o0):
 
 class ZLock(QObject):
     
-    def __init__(self,max_bead_spread=10,parent=None):
+    def __init__(self,max_bead_spread=8,parent=None):
         super().__init__(parent)
         
         self._thread = QThread()
@@ -44,7 +44,7 @@ class ZLock(QObject):
         self.signal_noise = 5e-4
         self.kalman_gain  = 0.1
         self.kalman_reset = 0.25
-        self.kalman_ratio = None
+        self.kalman_ratio = 1.0
         
         
     def set_busy(self,busy:bool):
@@ -97,8 +97,10 @@ class ZLock(QObject):
         return cc_v.max()/cc_h.max()
     
     def _kalman_estimate(self,ratio):
-        if self.kalman_ratio is None:
-            self.kalman_ratio = ratio
+        if ratio is None:
+            ratio = self.kalman_ratio
+        
+        print(ratio,self.kalman_ratio)
         
         if np.abs( self.kalman_ratio - ratio ) > self.kalman_reset:
             print('Reset: ', np.abs( self.kalman_ratio - ratio ) )
@@ -120,22 +122,20 @@ class ZLock(QObject):
         delta = proj.max() - off
         init_values = (0.95*delta,axis[np.argmax(proj)],0.75,0.05*delta,off)
         
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", OptimizeWarning)  # Treat warnings as errors
-            try:
-                popt,pcov = curve_fit(_GaussWLinear,axis,proj,init_values)
-                if np.any(np.isnan(pcov)) or np.any(np.isinf(pcov)):
-                    print("Curve fitting failed: covariance contains NaN or infinite values")
-                    std = None
-                else:
-                    std = popt[2]
-            except OptimizeWarning:
-                print("Curve fitting failed: OptimizeWarning encountered")
-                std = None
-            except Exception as e:
-                print("Curve fitting failed: An error occurred:", e)
-                std = None
-                
+        std = None
+        
+        popt,pcov,_,msg,ier = curve_fit(_GaussWLinear,axis,proj,init_values,full_output=True)
+        
+        if 'popt' not in locals() or 'pcov' not in locals():
+            print("Curve fitting failed: An error occurred during fitting")
+        else:
+            if ier > 4:
+                print("Curve fitting failed: " + msg)
+            elif np.any(np.isnan(pcov)) or np.any(np.isinf(pcov)):
+                print("Curve fitting failed: covariance contains NaN or infinite values")
+            else:
+                std = popt[2]
+        
         return std
         
     def _estimate_center_and_std(self,proj,axis):
@@ -180,9 +180,13 @@ class ZLock(QObject):
             # ratio = self._compute_ratio(frame)
             std_x = self._estimate_std( frame.mean(axis=1) )
             std_y = self._estimate_std( frame.mean(axis=0) )
-            ratio_raw = std_x / std_y
-            self.ratio_queue.push(ratio_raw)
+            print(std_x,std_y)
+            if std_x is None or std_y is None:
+                ratio_raw = None
+            else:
+                ratio_raw = std_x / std_y
             ratio = self._kalman_estimate(ratio_raw)
+            self.ratio_queue.push(ratio)
             print(ratio,ratio_raw)
             self.process_ratio(self.ratio_queue.median())
             
@@ -206,14 +210,14 @@ class ZLock(QObject):
         #COARSE
         neg_coarse_ratio = 0.6  # ratio
         # FINE
-        neg_fine_ratio   = 0.95 # ratio
+        neg_fine_ratio   = 0.9 # ratio
         # NOTHING
-        pos_fine_ratio   = 1.05 # ratio
+        pos_fine_ratio   = 1.1 # ratio
         # FINE
         pos_coarse_ratio = 1.4  # ratio
         # COARSE
         
-        delta_offset_step_min = 0.1 # Volts
+        delta_offset_step_min = 0.2 # Volts
         # delta_offset_step_max = 0.5 # Volts
             
 # =============================================================================        
@@ -226,7 +230,7 @@ class ZLock(QObject):
             if ratio < neg_coarse_ratio:
                 print('Coarse correction -')
                 stage_dev.positioning_coarse(stage_dev.axis_z,move_up,1)
-                self.kalman_ratio = None
+                self.kalman_ratio = 1.0
                 
             elif ratio < neg_fine_ratio:
                 if stage_dev.offset_tracker['z'] <= 10:
@@ -237,12 +241,12 @@ class ZLock(QObject):
                     print('Fine correction -')
                     step_size=delta_offset_step_min
                     stage_dev.positioning_fine_delta(stage_dev.axis_z,step_size)
-                self.kalman_ratio = None
+                self.kalman_ratio = 1.0
                         
             elif ratio > pos_coarse_ratio:
                 print('Coarse correction +')
                 stage_dev.positioning_coarse(stage_dev.axis_z,not move_up,1)
-                self.kalman_ratio = None
+                self.kalman_ratio = 1.0
                 
             elif ratio > pos_fine_ratio:
                 if stage_dev.offset_tracker['z'] >= (150-self.voltage_z-10):
@@ -253,7 +257,7 @@ class ZLock(QObject):
                     print('Fine correction +')
                     step_size=delta_offset_step_min
                     stage_dev.positioning_fine_delta(stage_dev.axis_z,-step_size)
-                self.kalman_ratio = None
+                self.kalman_ratio = 1.0
             
         except Exception as e: print(e)
                 

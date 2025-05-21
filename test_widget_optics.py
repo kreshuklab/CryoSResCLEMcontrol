@@ -12,7 +12,7 @@ from hardware import MicroFPGALaser
 # from hardware import DummyLaser
 from hardware import TopticaIBeamLaser
 from hardware import OmicronLaser_PycroManager
-from hardware import FilterWheel
+# from hardware import FilterWheel
 # from hardware import LaserDeviceBase
 #from gui import LaserVerticalWidget,LaserHorizontalWidget,LaserWidget,PwmWidget,FilterWheelWidget
 from gui import LaserWidget,FilterWheelWidget,PwmWidget
@@ -48,35 +48,35 @@ class MainWindow(QMainWindow):
         self.laser_405 = MicroFPGALaser('Laser405') # uFPGA
         self.laser_488 = TopticaIBeamLaser('Laser488') # Toptica iBeam
         self.laser_561 = DummyLaser('Laser561') # TBD
-        self.laser_640 = OmicronLaser_PycroManager('Laser640') # Omicron PycroManager
+        # self.laser_640 = OmicronLaser_PycroManager('Laser640') # Omicron PycroManager
         
-        self.filterwheel = FilterWheel('FilterWheel')
+        # self.filterwheel = FilterWheel('FilterWheel')
         
         self.dev_manager.add(self.laser_405)
         self.dev_manager.add(self.laser_488)
         self.dev_manager.add(self.laser_561)
-        self.dev_manager.add(self.laser_640)
-        self.dev_manager.add(self.filterwheel)
+        # self.dev_manager.add(self.laser_640)
+        # self.dev_manager.add(self.filterwheel)
         
         laser_405 = LaserWidget(self.laser_405,'405 nm','#C8B3E1',vertical=False)
         laser_488 = LaserWidget(self.laser_488,'488 nm','#B7FFFA',vertical=False)
         laser_561 = LaserWidget(self.laser_561,'561 nm','#FDFC96',vertical=False)
-        laser_640 = LaserWidget(self.laser_640,'640 nm','#FF746C',vertical=False)
+        # laser_640 = LaserWidget(self.laser_640,'640 nm','#FF746C',vertical=False)
         
         pwm = PwmWidget(self.laser_405,'405 nm','#C8B3E1',vertical=False)
         
-        fw_names  = ('520/35','530/30','585/40','617/50','692/50','none')
-        fw_colors = ('#E07070','#70E070','#E07070','#70E070','#E07070','#70E070')
-        filterwheel = FilterWheelWidget(self.filterwheel,'Filter Wheel',fw_names,fw_colors)
+        # fw_names  = ('520/35','530/30','585/40','617/50','692/50','none')
+        # fw_colors = ('#E07070','#70E070','#E07070','#70E070','#E07070','#70E070')
+        # filterwheel = FilterWheelWidget(self.filterwheel,'Filter Wheel',fw_names,fw_colors)
         
         layout.addWidget(laser_405)
         layout.addWidget(laser_488)
         layout.addWidget(laser_561)
-        layout.addWidget(laser_640)
+        # layout.addWidget(laser_640)
         
         layout.addWidget(pwm)
         
-        layout.addWidget(filterwheel)
+        # layout.addWidget(filterwheel)
         
         # pwm_widget = PwmWidget(self.ufpga  ,0,"405 nm",vertical=False)
         # layout.addWidget(pwm_widget)
