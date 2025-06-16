@@ -20,6 +20,9 @@ class DummyFilterWheel(Device):
         
     def free(self):
         super().free()
+        
+    def current_position_name(self):
+        return str(self.pos)
 
     ################################################################## Position
 
@@ -45,18 +48,25 @@ class ThorlabsFilterWheel(Device):
     
     ############################################################# CTOR and DTOR
     
-    def __init__(self,dev_name:str,com_port:str='COM8'):
+    def __init__(self,dev_name:str,com_port:str='COM8',pos_names=None):
         super().__init__(dev_name,'FilterWheel','Thorslab','FW')
         self.filterwheel = _thorlabss('COM8')
         self.filterwheel.enable()
         
-        self.num_pos = 6
-        self.pos     = 0
+        self.num_pos   = 6
+        self.pos       = 0
+        self.pos_names = pos_names
         self.get_position()
         
     def free(self):
         self.filterwheel.disable()
         super().free()
+        
+    def current_position_name(self):
+        if self.pos_names is None:
+            return str(self.pos)
+        else:
+            return self.pos_names[self.pos]
 
     ################################################################## Position
 

@@ -7,11 +7,11 @@ from PyQt5.QtWidgets import QMessageBox, QSplitter, QGroupBox, QTabWidget
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout
 from PyQt5.QtWidgets import QLineEdit,QLabel,QPushButton,QCheckBox,QComboBox
 from PyQt5.QtWidgets import QFileDialog,QTableWidget,QHeaderView,QTableWidgetItem
-from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal, QSettings, QByteArray
+from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal, QSettings, QByteArray, QTimer
 from PyQt5.QtGui import QIcon
 
 from hardware import DeviceManager
-from hardware import DummyLaser,MicroFPGALaser,TopticaIBeamLaser,OmicronLaser_PycroManager
+from hardware import DummyLaser,MicroFPGALaser,TopticaIBeamLaser #,OmicronLaser_PycroManager
 from hardware import ThorlabsFilterWheel, DummyFilterWheel
 from hardware import AttoCubeStage, DummyStage
 from hardware import HamamatsuCamera,PySpinCamera,DummyCamera
@@ -26,11 +26,11 @@ import numpy as np
 
 import qtmodern.styles
 
-def custom_assert_handler(exc_type, exc_value, exc_traceback):
-    QMessageBox.critical(None, str(exc_type.__name__), str(exc_value))
-    sys.exit(1)
+# def custom_assert_handler(exc_type, exc_value, exc_traceback):
+#     QMessageBox.critical(None, str(exc_type.__name__), str(exc_value))
+#     sys.exit(1)
 
-sys.excepthook = custom_assert_handler
+# sys.excepthook = custom_assert_handler
 
 class MainWindow(QMainWindow):
     
@@ -183,8 +183,47 @@ class MainWindow(QMainWindow):
         self.resize(2000,1200)
         self.restoreGeometry(self.settings.value("window/geometry",QByteArray()))
         
+        QTimer.singleShot(0, self.after_show)
+
+    @pyqtSlot()
+    def after_show(self):
+        main_roi_x = self.settings.value("main_camera/x",-1)
+        main_roi_y = self.settings.value("main_camera/y",-1)
+        
+        if (main_roi_x >= 0) and (main_roi_y >= 0):
+            self.main_cam_widget.got_new_roi_position(main_roi_x,main_roi_y)
+        
+        main_roi_n = self.settings.value("main_camera/N",0)
+        if main_roi_n > 0:
+            self.main_cam_widget.roi_config_size.setValue(main_roi_n)
+            self.main_cam_widget.roi_siz_modified()
+            
+        main_roi_idx = self.settings.value("main_camera/roi_idx",0)
+        print(main_roi_idx)
+        if main_roi_idx>0:
+            self.main_cam_widget.clicked_roi_in()
+        
     def closeEvent(self, event):
         self.settings.setValue("window/geometry", self.saveGeometry())
+        if self.main_cam_widget.cam_handler.current_roi > 0:
+            rect = self.main_cam_widget.cam_handler.roi_list[1]['rect']
+            x = rect.x()
+            y = rect.y()
+            N = rect.width()
+            x = x + N//2
+            y = y + N//2
+            self.settings.setValue("main_camera/x",x)
+            self.settings.setValue("main_camera/y",y)
+            self.settings.setValue("main_camera/N",N)
+            self.settings.setValue("main_camera/roi_idx",1)
+        
+        else:
+            x,y,N = self.main_cam_widget._get_roi_entries()
+            self.settings.setValue("main_camera/x",x)
+            self.settings.setValue("main_camera/y",y)
+            self.settings.setValue("main_camera/N",N)
+            self.settings.setValue("main_camera/roi_idx",self.main_cam_widget.cam_handler.current_roi)
+        
 
         try:
             self.main_cam.stop_acquisition()
@@ -731,6 +770,7 @@ class MainWindow(QMainWindow):
         names  = ('515/30','525/30','534/30','617/73','697/58','none')
         colors = ('#80EF80','#E5F489','#FFEE8C','#FF9D37','#FF6060','#BEBEBE')
         layout.addWidget(FilterWheelWidget(self.dev_manager.FilterWheel,'Filter Wheel',names,colors,vertical=False))
+        self.dev_manager.FilterWheel.pos_names = names
         
         widget.setTitle('Filter Wheel')
         widget.setLayout(layout)

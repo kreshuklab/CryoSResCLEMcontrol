@@ -15,6 +15,7 @@ from gui.ui_utils import create_iconized_button,update_iconized_button
 from gui.ui_utils import create_int_line_edit,create_combo_box,create_doublespinbox
 from gui.ui_utils import StyledFrame
 from os.path import join,normpath
+from os import makedirs
 
 ############################################################################### Image to NDTiff helper
 
@@ -25,11 +26,12 @@ class ImageToNDTiff(QObject):
     def __init__(self,camera_thread):
         super().__init__()
         self._cam = camera_thread
-        self.current_file = None
-        self.is_acquiring = False
-        self.process      = True
-        self.frame_count  = 0
-        self.max_count    = 0
+        self.current_file  = None
+        self.metadata_file = None
+        self.is_acquiring  = False
+        self.process       = True
+        self.frame_count   = 0
+        self.max_count     = 0
         
         self.skip_counter = 0
         self.skip_limit   = 0
@@ -56,7 +58,10 @@ class ImageToNDTiff(QObject):
                              'CameraVendor':   self._cam.vendor,
                              'CameraModel':    self._cam.model,
                              'PixelSizeNM':    self._cam.pix_size_nm}
-        self.current_file = NDTiffDataset(filename,summary_metadata=summary_metadata,writable=True)
+        makedirs(filename,exist_ok=True)
+        self.current_file  = NDTiffDataset(filename,summary_metadata=summary_metadata,writable=True)
+        self.metadata_file = open(filename+'\\NDTiff.csv','w')
+        self.metadata_file.write('#N_FRAME,TIMESTAMP,X,Y,Z,LASER_INDEX,LASER_ON_NAME,LASER_VALUE,LASER_UNIT,FILTER_WHEEL_POS,FILTER_WHEEL_NAME\n')
         
     def dataset_push_frame(self):
         if self.current_file is None:
@@ -73,6 +78,14 @@ class ImageToNDTiff(QObject):
         md_img = {'timestamp': str(self._cam.timestamp),
                   'frame_count': self.frame_count}
         self.current_file.put_image(md_coord,self._cam.frame_buffer,md_img)
+        laser_index,laser_name,laser_power,laser_units = self.dev_manager.get_active_laser()
+        x = self.dev_manager.Stage.step_counter['x']
+        y = self.dev_manager.Stage.step_counter['y']
+        z = self.dev_manager.Stage.step_counter['z']
+        self.metadata_file.write(f'{self.frame_count},{str(self._cam.timestamp)},')
+        self.metadata_file.write(f'{x},{y},{z},')
+        self.metadata_file.write(f'{laser_index},{laser_name},{laser_power},{laser_units},')
+        self.metadata_file.write(f'{self.dev_manager.FilterWheel.pos},{self.dev_manager.FilterWheel.current_position_name()}\n')
         self.frame_count = self.frame_count + 1
         
     def dataset_check_done_state(self):
@@ -92,6 +105,7 @@ class ImageToNDTiff(QObject):
         self.is_acquiring = False
         self.skip_counter = 0
         self.skip_limit   = 0
+        self.metadata_file.close()
     
     def save_snap(self,filename):
         if self._cam.frame_buffer.size > 0:
@@ -963,6 +977,7 @@ class CameraWidget(QWidget):
     @pyqtSlot()
     def clicked_roi_in(self):
         x,y,N = self._get_roi_entries()
+        print(x,y,N)
         ratio = self.cam_handler.next_roi(x,y,N)
         self._scale_contrast_value(ratio)
         if self.image.track_roi:
@@ -1003,6 +1018,7 @@ class CameraWidget(QWidget):
         y = int(base*np.round(float(y)/base))
         self.roi_config_pos_x.setText(str(x))
         self.roi_config_pos_y.setText(str(y))
+        print(x,y)
         self.roi_new_pos.emit(x,y)
         
     @pyqtSlot()

@@ -53,6 +53,19 @@ class DeviceManager:
     def free(self):
         for dev in self.dev_dict.values():
             dev.free()
-        
+            
+    def get_active_laser(self):
+        index = 0
+        for dev in self.dev_dict.values():
+            if dev.type == 'Laser':
+                if isinstance(dev.power_status, list):
+                    for i in range(len(dev.power_status)):
+                        if dev.power_status[i]:
+                            return index+(i/10),dev.name+f'.{i}',dev.power_value[i],dev.power_value_unit
+                else:
+                    if dev.power_status:
+                        return index,dev.name,dev.power_value,dev.power_value_unit
+                index += 1
+        return 'none',0,0,'none'
 
 
