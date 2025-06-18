@@ -110,7 +110,7 @@ class _CameraDevice(QObject):
         next_roi = self.current_roi + 1
         if next_roi < self.roi_levels:
             self.config_roi(next_roi,center_x,center_y,box_size)
-            cur_area = self.roi_list[self.current_roi]['rect'].width()*self.roi_list[self.current_roi]['rect'].height()    
+            cur_area = self.roi_list[self.current_roi]['rect'].width()*self.roi_list[self.current_roi]['rect'].height()
             new_area = self.roi_list[next_roi]['rect'].width()*self.roi_list[next_roi]['rect'].height()
             area_ratio = new_area/cur_area
             if self.do_image:
@@ -121,12 +121,11 @@ class _CameraDevice(QObject):
                 self.set_roi_by_index(next_roi)
         return area_ratio
     
-    def previous_roi(self,center_x,center_y,box_size):
+    def previous_roi(self):
         area_ratio = 1
         previous_roi = self.current_roi - 1
         if previous_roi >= 0:
-            self.config_roi(previous_roi,center_x,center_y,box_size)
-            cur_area = self.roi_list[self.current_roi]['rect'].width()*self.roi_list[self.current_roi]['rect'].height()    
+            cur_area = self.roi_list[self.current_roi]['rect'].width()*self.roi_list[self.current_roi]['rect'].height()
             new_area = self.roi_list[previous_roi]['rect'].width()*self.roi_list[previous_roi]['rect'].height()
             area_ratio = new_area/cur_area
             if self.do_image:
@@ -148,10 +147,8 @@ class _CameraDevice(QObject):
             if roi_index == 0:
                 self.set_full_roi()
                 self.current_roi = roi_index
-                # self.hotpix_ref_update( self.roi_list[roi_index]['rect'] )
-            elif self.set_roi( self.roi_list[roi_index]['rect'] ):
+            elif self.set_roi( self._get_roi(roi_index) ):
                 self.current_roi = roi_index
-                # self.hotpix_ref_update( self.roi_list[roi_index]['rect'] )
             else:
                 x = self.roi_list[roi_index]['rect'].x()
                 y = self.roi_list[roi_index]['rect'].y()
@@ -169,6 +166,16 @@ class _CameraDevice(QObject):
     def set_roi(self,roi_rect:QRect): # To Be Implemented by Child
         print(f'set_roi not implemented ({self.uid}: {self.vendor} - {self.model})')
         return True
+    
+    def _get_roi(self,roi_index):
+        x = self.roi_list[roi_index]['rect'].x()
+        y = self.roi_list[roi_index]['rect'].y()
+        w = self.roi_list[roi_index]['rect'].width()
+        h = self.roi_list[roi_index]['rect'].height()
+        for idx in range(roi_index):
+            x += self.roi_list[idx]['rect'].x()
+            y += self.roi_list[idx]['rect'].y()
+        return QRect(x,y,w,h)
     
     def _get_default_roi_level(self,roi_index):
         if (roi_index > 0) and (roi_index < (self.roi_levels+1)):
@@ -246,7 +253,7 @@ class DummyCamera(_CameraDevice):
         
         vendor = 'TestCamera'
         model  = 'Telefunken_Test_Card_T05'
-        roi_levels = 2
+        roi_levels = 3
         
         super().__init__(name,vendor,model,roi_levels,136,exposure_time_ms,step_roi_pos=4,step_roi_siz=8)
         
@@ -347,7 +354,7 @@ if _should_use_dcam:
             
             vendor = self.camera.dev_getstring(DCAM_IDSTR.VENDOR)
             model  = self.camera.dev_getstring(DCAM_IDSTR.MODEL)
-            roi_levels = 2
+            roi_levels = 3
             
             # Configuration of common parameter for cameras
             super().__init__(name,vendor,model,roi_levels,
@@ -487,7 +494,7 @@ if _should_use_pyspin:
             
             vendor = self.camera.DeviceVendorName.ToString()
             model  = self.camera.DeviceModelName.ToString()
-            roi_levels = 2
+            roi_levels = 3
             
             self._exp_real_time_ms = 20
             self._exp_buffer_size  = 0

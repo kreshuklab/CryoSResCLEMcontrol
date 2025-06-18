@@ -187,44 +187,35 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot()
     def after_show(self):
-        main_roi_x = self.settings.value("main_camera/x",-1)
-        main_roi_y = self.settings.value("main_camera/y",-1)
-        
-        if (main_roi_x >= 0) and (main_roi_y >= 0):
-            self.main_cam_widget.got_new_roi_position(main_roi_x,main_roi_y)
-        
-        main_roi_n = self.settings.value("main_camera/N",0)
-        if main_roi_n > 0:
-            self.main_cam_widget.roi_config_size.setValue(main_roi_n)
-            self.main_cam_widget.roi_siz_modified()
-            
-        main_roi_idx = self.settings.value("main_camera/roi_idx",0)
-        print(main_roi_idx)
-        if main_roi_idx>0:
-            self.main_cam_widget.clicked_roi_in()
+        for camera_name,cam_widget in zip(('main_camera','aux_camera'),(self.main_cam_widget,self.aux_cam_widget)):
+            roi_levels = self.settings.value(f'{camera_name}/num_roi',2)
+            for i in range(1,roi_levels):
+                x = self.settings.value(f'{camera_name}/{i}/x',16)
+                y = self.settings.value(f'{camera_name}/{i}/y',16)
+                w = self.settings.value(f'{camera_name}/{i}/w',32)
+                h = self.settings.value(f'{camera_name}/{i}/h',32)
+                cam_widget.cam_handler.roi_list[i]['rect'].setRect(x,y,w,h)
+                if i == 1:
+                    cam_widget.got_new_roi_position(x+w//2,y+h//2)
+                    cam_widget.roi_config_size.setValue(w)
+                    cam_widget.roi_siz_modified()
+                    cam_widget.clicked_roi_in()
         
     def closeEvent(self, event):
         self.settings.setValue("window/geometry", self.saveGeometry())
-        if self.main_cam_widget.cam_handler.current_roi > 0:
-            rect = self.main_cam_widget.cam_handler.roi_list[1]['rect']
-            x = rect.x()
-            y = rect.y()
-            N = rect.width()
-            x = x + N//2
-            y = y + N//2
-            self.settings.setValue("main_camera/x",x)
-            self.settings.setValue("main_camera/y",y)
-            self.settings.setValue("main_camera/N",N)
-            self.settings.setValue("main_camera/roi_idx",1)
+        for camera_name,cam_widget in zip(('main_camera','aux_camera'),(self.main_cam_widget,self.aux_cam_widget)):
+            self.settings.setValue(f'{camera_name}/num_roi',self.main_cam.roi_levels)
+            for i in range(1,cam_widget.cam_handler.roi_levels):
+                rect = cam_widget.cam_handler.roi_list[i]['rect']
+                x = rect.x()
+                y = rect.y()
+                w = rect.width()
+                h = rect.height()
+                self.settings.setValue(f'{camera_name}/{i}/x',x)
+                self.settings.setValue(f'{camera_name}/{i}/y',y)
+                self.settings.setValue(f'{camera_name}/{i}/w',w)
+                self.settings.setValue(f'{camera_name}/{i}/h',h)
         
-        else:
-            x,y,N = self.main_cam_widget._get_roi_entries()
-            self.settings.setValue("main_camera/x",x)
-            self.settings.setValue("main_camera/y",y)
-            self.settings.setValue("main_camera/N",N)
-            self.settings.setValue("main_camera/roi_idx",self.main_cam_widget.cam_handler.current_roi)
-        
-
         try:
             self.main_cam.stop_acquisition()
             self.aux_cam.stop_acquisition()

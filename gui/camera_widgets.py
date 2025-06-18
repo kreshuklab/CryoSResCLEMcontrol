@@ -977,7 +977,6 @@ class CameraWidget(QWidget):
     @pyqtSlot()
     def clicked_roi_in(self):
         x,y,N = self._get_roi_entries()
-        print(x,y,N)
         ratio = self.cam_handler.next_roi(x,y,N)
         self._scale_contrast_value(ratio)
         if self.image.track_roi:
@@ -986,8 +985,7 @@ class CameraWidget(QWidget):
     
     @pyqtSlot()
     def clicked_roi_out(self):
-        x,y,N = self._get_roi_entries()
-        ratio = self.cam_handler.previous_roi(x,y,N)
+        ratio = self.cam_handler.previous_roi()
         self._scale_contrast_value(ratio)
     
     @pyqtSlot()
@@ -1018,7 +1016,6 @@ class CameraWidget(QWidget):
         y = int(base*np.round(float(y)/base))
         self.roi_config_pos_x.setText(str(x))
         self.roi_config_pos_y.setText(str(y))
-        print(x,y)
         self.roi_new_pos.emit(x,y)
         
     @pyqtSlot()
