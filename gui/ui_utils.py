@@ -152,6 +152,7 @@ class ToogleButton(QWidget):
         self.off_icon = off_icon if off_icon is not None else on_icon
         
         layout = QVBoxLayout()
+        layout.setContentsMargins(0,0,0,0)
         
         if self.off_icon is not None:
             self.button = create_iconized_button(self.off_icon,self.off_text)
@@ -164,9 +165,6 @@ class ToogleButton(QWidget):
         self.colorbar.setStyleSheet(colorbar_style_sheet(bar_color))
         self.colorbar.setEnabled(self.state)
         layout.addWidget(self.colorbar,0)
-        
-        
-        layout.addStretch()
         
         self.setLayout( layout )
         

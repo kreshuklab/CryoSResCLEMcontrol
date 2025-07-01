@@ -825,7 +825,7 @@ splash = QSplashScreen()
 splash.showMessage("Starting...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
 splash.show()
 
-window = MainWindow(splash,dummies=True)
+window = MainWindow(splash,dummies=False)
 splash.finish(window)
 
 window.show()

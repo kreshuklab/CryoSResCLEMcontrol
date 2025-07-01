@@ -44,7 +44,7 @@ class ImageToNDTiff(QObject):
     def disable_autosave(self):
         self.process = False
     
-    def dataset_start(self,filename,num_frames=-1):
+    def dataset_start(self,work_dir,filename,num_frames=-1):
         if self.is_acquiring:
             return
         
@@ -59,8 +59,8 @@ class ImageToNDTiff(QObject):
                              'CameraModel':    self._cam.model,
                              'PixelSizeNM':    self._cam.pix_size_nm}
         makedirs(filename,exist_ok=True)
-        self.current_file  = NDTiffDataset(filename,summary_metadata=summary_metadata,writable=True)
-        self.metadata_file = open(filename+'\\NDTiff.csv','w')
+        self.current_file  = NDTiffDataset(work_dir,name=filename,summary_metadata=summary_metadata,writable=True)
+        self.metadata_file = open(normpath(join(self.current_file.path,filename))+'.csv','w')
         self.metadata_file.write('#N_FRAME,TIMESTAMP,X,Y,Z,LASER_INDEX,LASER_ON_NAME,LASER_VALUE,LASER_UNIT,FILTER_WHEEL_POS,FILTER_WHEEL_NAME\n')
         
     def dataset_push_frame(self):
@@ -107,16 +107,16 @@ class ImageToNDTiff(QObject):
         self.skip_limit   = 0
         self.metadata_file.close()
     
-    def save_snap(self,filename):
+    def save_snap(self,work_dir,filename):
         if self._cam.frame_buffer.size > 0:
-            self.dataset_start(filename)
+            self.dataset_start(work_dir,filename)
             self.dataset_push_frame()
             self.dataset_finish()
             self.saving_progress.emit('')
             
-    def start_acquisition(self,filename,num_frames,skip_limit=0):
+    def start_acquisition(self,work_dir,filename,num_frames,skip_limit=0):
         self.skip_limit = skip_limit
-        self.dataset_start(filename,num_frames)
+        self.dataset_start(work_dir,filename,num_frames)
         if self.max_count > 0:
             self.saving_progress.emit(f'{self.frame_count}/{self.max_count}')
         else:
@@ -842,21 +842,21 @@ class CameraWidget(QWidget):
         file_name = file_name.strip()
         if file_name == '':
             return
-        file_name = normpath(join( self.working_dir,file_name))
+        # file_name = normpath(join( self.working_dir,file_name))
         if not self.is_live:
-            self.img2tiff.save_snap(file_name)
+            self.img2tiff.save_snap(self.working_dir,file_name)
         elif self.is_saving:
             self.img2tiff.stop_acquisition()
         else:
             if self.num_frames.value() > 0:
                 self.is_saving = True
                 self.img2tiff.enable_autosave()
-                self.img2tiff.start_acquisition(file_name,self.num_frames.value(),self.skip_frames.value())
+                self.img2tiff.start_acquisition(self.working_dir,file_name,self.num_frames.value(),self.skip_frames.value())
                 self.filename.setEnabled(False)
                 self.num_frames.setEnabled(False)
                 update_iconized_button(self.save_button,_g_icon_prov.square,tooltip='Stop acquisition')
             else:
-                self.img2tiff.save_snap(file_name)
+                self.img2tiff.save_snap(self.working_dir,file_name)
     
     @pyqtSlot()
     def saving_finished(self):

@@ -9,6 +9,7 @@ dependencies:
   - numba
   - numpy=1
   - pyqt
+  - pyqtchart
   - pyserial
   - python=3.10
   - scikit-image

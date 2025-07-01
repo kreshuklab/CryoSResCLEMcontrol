@@ -22,6 +22,7 @@ class ZLock(QObject):
         TYPE_ERROR = 3
         
     error_reporting = pyqtSignal(int,int,str)
+    ratios_broadcast = pyqtSignal(float,float)
     
     def __init__(self,max_bead_spread=8,parent=None):
         super().__init__(parent)
@@ -156,6 +157,7 @@ class ZLock(QObject):
             ratio = self._kalman_estimate(ratio_raw)
             self.ratio_queue.push(ratio)
             print(ratio,ratio_raw)
+            self.ratios_broadcast.emit(ratio_raw,ratio)
             self.process_ratio(self.ratio_queue.median())
             
     
