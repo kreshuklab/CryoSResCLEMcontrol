@@ -23,6 +23,18 @@ class DummyStage(Device):
     def free(self):
         self.set_mode_ground()
         super().free()
+        
+    def set_configuration(self,init_voltage_offset=65):
+        self.init_voltage_offset = init_voltage_offset
+        self.set_mode_mixed()
+        self.positioning_fine_absolute(1,init_voltage_offset)
+        self.positioning_fine_absolute(2,init_voltage_offset)
+        self.positioning_fine_absolute(3,init_voltage_offset)
+    
+    @pyqtSlot()
+    def reset_configuration(self):
+        self.set_mode_ground()
+        self.set_configuration(self.init_voltage_offset)
     
     def set_position_counter(self,x=0,y=0,z=0):
         self.x_steps = x

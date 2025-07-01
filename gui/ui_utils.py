@@ -1,7 +1,7 @@
-from PyQt5.QtCore import Qt,QSize
-from PyQt5.QtGui import QIcon, QFontMetrics,QIntValidator,QValidator
+from PyQt5.QtGui import QIcon, QFontMetrics, QIntValidator, QValidator
+from PyQt5.QtCore import Qt, QSize, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import QPushButton, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox
-from PyQt5.QtWidgets import QFrame
+from PyQt5.QtWidgets import QFrame, QWidget, QVBoxLayout, QFormLayout, QLabel
 from glob import glob
 import numpy as np
 
@@ -90,6 +90,29 @@ class SteppingSpinBox(QSpinBox):
         value = self.value()
         new_value = value + steps * self.base  # Ensure stepping in multiples of 4
         self.setValue(new_value)
+     
+############################################################################### Create Button with Icon
+
+class LogDoubleSpinBox(QDoubleSpinBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDecimals(3)
+        self.setRange(-7, 0)
+        self.setSingleStep(0.05)
+        self.setSuffix(" (log₁₀)")
+        self.valueChanged.connect(self._update_tooltip)
+        self._update_tooltip(self.value())
+
+    def log_value(self):
+        return 10 ** self.value()
+
+    def set_log_value(self, val):
+        import math
+        if val > 0:
+            self.setValue(math.log10(val))
+
+    def _update_tooltip(self, val):
+        self.setToolTip(f"Real value: {(10 ** val):.3e}")
 
 ############################################################################### Create Button with Icon
 
@@ -111,6 +134,58 @@ def update_iconized_button(button,icon:QIcon,text:str='',tooltip:str='',size:QSi
     if tooltip:
         button.setToolTip(tooltip)
     return button
+
+############################################################################### Toogle button with lower bar indicator
+
+class ToogleButton(QWidget):
+    toogled = pyqtSignal(bool)
+    
+    def __init__(self,on_text,on_icon=None,off_text=None,off_icon=None,bar_color='#77DD66',parent=None):
+        super().__init__(parent)
+        
+        self.state = False
+        
+        self.on_text  = on_text
+        self.off_text = off_text if off_text is not None else on_text
+        
+        self.on_icon  = on_icon
+        self.off_icon = off_icon if off_icon is not None else on_icon
+        
+        layout = QVBoxLayout()
+        
+        if self.off_icon is not None:
+            self.button = create_iconized_button(self.off_icon,self.off_text)
+        else:
+            self.button = QPushButton(self.off_text)
+        layout.addWidget(self.button,1)
+        
+        self.colorbar = QLabel()
+        self.colorbar.setFixedHeight(7)
+        self.colorbar.setStyleSheet(colorbar_style_sheet(bar_color))
+        self.colorbar.setEnabled(self.state)
+        layout.addWidget(self.colorbar,0)
+        
+        
+        layout.addStretch()
+        
+        self.setLayout( layout )
+        
+        self.button.clicked.connect(self.button_trigger)
+        
+    @pyqtSlot()
+    def button_trigger(self):
+        if self.state:
+            self.button.setText(self.off_text)
+            if self.off_icon is not None:
+                self.button.setIcon(self.off_icon)
+            self.state = False
+        else:
+            self.button.setText(self.on_text)
+            if self.on_icon is not None:
+                self.button.setIcon(self.on_icon)
+            self.state = True
+        self.colorbar.setEnabled(self.state)
+        self.toogled.emit(self.state)
 
 ############################################################################### Create QLineEdit for integers
 

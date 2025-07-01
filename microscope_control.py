@@ -16,7 +16,7 @@ from hardware import ThorlabsFilterWheel, DummyFilterWheel
 from hardware import AttoCubeStage, DummyStage
 from hardware import HamamatsuCamera,PySpinCamera,DummyCamera
 
-from gui import StageWidget,CameraWidget,LaserWidget,FilterWheelWidget,PwmWidget
+from gui import StageWidget,CameraWidget,LaserWidget,FilterWheelWidget,PwmWidget,ZLockWidget
 from gui import IconProvider,create_iconized_button,create_spinbox,create_doublespinbox,update_iconized_button
 
 from core import Worker, ZLock
@@ -119,6 +119,24 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(top_splitter)
         top_widget.setLayout(top_layout)
         
+        ###########################################################s
+        
+        self.restart_main_live.connect( self.main_cam_widget.clicked_live )
+        self.restart_aux_live .connect( self.aux_cam_widget.clicked_live  )
+        
+        self.worker = Worker()
+        self.worker.dev_manager = self.dev_manager
+        self.worker.set_main_cam( self.main_cam_widget )
+        self.worker.set_aux_cam ( self.aux_cam_widget  )
+        self._start_z_coarse.connect( self.worker.start_coarse_z_sweep )
+        self._start_z_fine.connect( self.worker.start_fine_z_sweep )
+        
+        ###########################################################
+        
+        self.z_locker = ZLock()
+        self.z_locker.dev_manager = self.dev_manager
+        self.z_locker.set_aux_cam( self.aux_cam_widget )
+        
         ########################################################### BOTTOM
         
         self.wgt_commands     = self._create_commands()
@@ -138,30 +156,17 @@ class MainWindow(QMainWindow):
         bottom_layout = QHBoxLayout()
         bottom_layout.setContentsMargins(0,0,0,0)
         
+        self.z_lock_widget = ZLockWidget(self.z_locker)
+        
         bottom_layout.addWidget(self.wgt_lasers,0)
         bottom_layout.addWidget(block_widget,0)
         bottom_layout.addWidget(self.wgt_stage,0)
         bottom_layout.addWidget(self.wgt_commands,1)
+        bottom_layout.addWidget(self.z_lock_widget,0)
         
         bottom_widget.setLayout(bottom_layout)
         
-        ###########################################################s
         
-        self.restart_main_live.connect( self.main_cam_widget.clicked_live )
-        self.restart_aux_live .connect( self.aux_cam_widget.clicked_live  )
-        
-        self.worker = Worker()
-        self.worker.dev_manager = self.dev_manager
-        self.worker.set_main_cam( self.main_cam_widget )
-        self.worker.set_aux_cam ( self.aux_cam_widget  )
-        self._start_z_coarse.connect( self.worker.start_coarse_z_sweep )
-        self._start_z_fine.connect( self.worker.start_fine_z_sweep )
-        
-        ###########################################################
-        
-        self.z_locker = ZLock()
-        self.z_locker.dev_manager = self.dev_manager
-        self.z_locker.set_aux_cam( self.aux_cam_widget )
         
         ###########################################################s
         
@@ -188,12 +193,12 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def after_show(self):
         for camera_name,cam_widget in zip(('main_camera','aux_camera'),(self.main_cam_widget,self.aux_cam_widget)):
-            roi_levels = self.settings.value(f'{camera_name}/num_roi',2)
+            roi_levels = int(self.settings.value(f'{camera_name}/num_roi',2))
             for i in range(1,roi_levels):
-                x = self.settings.value(f'{camera_name}/{i}/x',16)
-                y = self.settings.value(f'{camera_name}/{i}/y',16)
-                w = self.settings.value(f'{camera_name}/{i}/w',32)
-                h = self.settings.value(f'{camera_name}/{i}/h',32)
+                x = int(self.settings.value(f'{camera_name}/{i}/x',16))
+                y = int(self.settings.value(f'{camera_name}/{i}/y',16))
+                w = int(self.settings.value(f'{camera_name}/{i}/w',32))
+                h = int(self.settings.value(f'{camera_name}/{i}/h',32))
                 cam_widget.cam_handler.roi_list[i]['rect'].setRect(x,y,w,h)
                 if i == 1:
                     cam_widget.got_new_roi_position(x+w//2,y+h//2)
@@ -201,8 +206,31 @@ class MainWindow(QMainWindow):
                     cam_widget.roi_siz_modified()
                     cam_widget.clicked_roi_in()
         
+        was_fine_enabled = int(self.settings.value('z_lock/fine_state',1))
+        if was_fine_enabled>0:
+            print('a')
+            self.z_lock_widget.fine_check.setChecked(Qt.CheckState.Checked)
+        else:
+            print('b')
+            self.z_lock_widget.fine_check.setChecked(Qt.CheckState.Unchecked)
+        self.z_lock_widget.coarse_low.setValue(float(self.settings.value('z_lock/coarse_low',0.6)))
+        self.z_lock_widget.coarse_up .setValue(float(self.settings.value('z_lock/coarse_up' ,1.4)))
+        self.z_lock_widget.fine_low  .setValue(float(self.settings.value('z_lock/fine_low'  ,0.9)))
+        self.z_lock_widget.fine_up   .setValue(float(self.settings.value('z_lock/fine_up'   ,1.1)))
+        self.z_lock_widget.kalman_signal.set_log_value(float(self.settings.value('z_lock/kalman_signal',1.0)))
+        self.z_lock_widget.kalman_noise .set_log_value(float(self.settings.value('z_lock/kalman_noise' ,5e-4)))
+        
     def closeEvent(self, event):
-        self.settings.setValue("window/geometry", self.saveGeometry())
+        fine_enabled = 1 if self.z_lock_widget.fine_check.checkState()==Qt.CheckState.Checked else 0
+        self.settings.setValue("window/geometry",  self.saveGeometry())
+        self.settings.setValue('z_lock/fine_state',fine_enabled)
+        self.settings.setValue('z_lock/coarse_low',self.z_lock_widget.coarse_low.value())
+        self.settings.setValue('z_lock/coarse_up', self.z_lock_widget.coarse_up.value())
+        self.settings.setValue('z_lock/fine_low',  self.z_lock_widget.fine_up.value())
+        self.settings.setValue('z_lock/fine_up',   self.z_lock_widget.kalman_signal.value())
+        self.settings.setValue('z_lock/kalman_signal',self.z_lock_widget.kalman_signal.log_value())
+        self.settings.setValue('z_lock/kalman_noise', self.z_lock_widget.kalman_noise.log_value() )
+                                                                                 
         for camera_name,cam_widget in zip(('main_camera','aux_camera'),(self.main_cam_widget,self.aux_cam_widget)):
             self.settings.setValue(f'{camera_name}/num_roi',self.main_cam.roi_levels)
             for i in range(1,cam_widget.cam_handler.roi_levels):
@@ -244,14 +272,14 @@ class MainWindow(QMainWindow):
         folder_button = create_iconized_button(icon_prov.folder,tooltip='Select folder...')
         folder_button.clicked.connect(lambda: self.set_folder( QFileDialog.getExistingDirectory(self,'Select working folder') ) )
         
-        self.focus_lock_button = create_iconized_button(icon_prov.lock_z,'Start focus lock') #QPushButton('Focus lock')
-        self.focus_lock_button.clicked.connect( self.z_lock_start )
+        # self.focus_lock_button = create_iconized_button(icon_prov.lock_z,'Start focus lock') #QPushButton('Focus lock')
+        # self.focus_lock_button.clicked.connect( self.z_lock_start )
         
-        folder_layout.addWidget(QLabel('Working directory: '),0)
+        folder_layout.addWidget(QLabel('<b>Working directory:</b>'),0)
         folder_layout.addWidget(self.folder,1)
         folder_layout.addWidget(folder_button,0)
-        folder_layout.addSpacing(10)
-        folder_layout.addWidget(self.focus_lock_button,0)
+        # folder_layout.addSpacing(10)
+        # folder_layout.addWidget(self.focus_lock_button,0)
         
         self.folder_widget.setLayout(folder_layout)
         
@@ -297,26 +325,26 @@ class MainWindow(QMainWindow):
         self.main_cam_widget.working_dir = self.folder.text()
         self.aux_cam_widget.working_dir = self.folder.text()
         
-    @pyqtSlot()
-    def z_lock_start(self):
-        icon_prov = IconProvider()
+    # @pyqtSlot()
+    # def z_lock_start(self):
+    #     icon_prov = IconProvider()
         
-        self.z_locker.voltage_z = self.z_coarse_volts.value()
-        self.z_locker.start()
+    #     self.z_locker.voltage_z = self.z_coarse_volts.value()
+    #     self.z_locker.start()
         
-        self.focus_lock_button.clicked.disconnect() 
-        self.focus_lock_button.clicked.connect(self.z_lock_stop)
-        update_iconized_button(self.focus_lock_button,icon_prov.square,'Stop focus lock')
+    #     self.focus_lock_button.clicked.disconnect() 
+    #     self.focus_lock_button.clicked.connect(self.z_lock_stop)
+    #     update_iconized_button(self.focus_lock_button,icon_prov.square,'Stop focus lock')
         
-    @pyqtSlot()
-    def z_lock_stop(self):
-        icon_prov = IconProvider()
+    # @pyqtSlot()
+    # def z_lock_stop(self):
+    #     icon_prov = IconProvider()
         
-        self.z_locker.stop()
+    #     self.z_locker.stop()
         
-        self.focus_lock_button.clicked.disconnect() 
-        self.focus_lock_button.clicked.connect(self.z_lock_start)
-        update_iconized_button(self.focus_lock_button,icon_prov.lock_z,'Start focus lock')
+    #     self.focus_lock_button.clicked.disconnect() 
+    #     self.focus_lock_button.clicked.connect(self.z_lock_start)
+    #     update_iconized_button(self.focus_lock_button,icon_prov.lock_z,'Start focus lock')
         
     def _z_sweep(self):
         widget = QWidget()
@@ -797,7 +825,7 @@ splash = QSplashScreen()
 splash.showMessage("Starting...", Qt.AlignBottom | Qt.AlignCenter, Qt.white)
 splash.show()
 
-window = MainWindow(splash,dummies=False)
+window = MainWindow(splash,dummies=True)
 splash.finish(window)
 
 window.show()
