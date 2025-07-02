@@ -92,7 +92,7 @@ class ZLock(QObject):
         if ratio is None:
             ratio = self.kalman_ratio
         
-        print(ratio,self.kalman_ratio)
+        # print(ratio,self.kalman_ratio)
         
         if np.abs( self.kalman_ratio - ratio ) > self.kalman_reset:
             print('Reset: ', np.abs( self.kalman_ratio - ratio ) )
@@ -155,40 +155,17 @@ class ZLock(QObject):
             else:
                 ratio_raw = std_x / std_y
             ratio = self._kalman_estimate(ratio_raw)
-            self.ratio_queue.push(ratio)
-            print(ratio,ratio_raw)
+            # self.ratio_queue.push(ratio)
+            # print(ratio,ratio_raw)
             self.ratios_broadcast.emit(ratio_raw,ratio)
-            self.process_ratio(self.ratio_queue.median())
+            # self.process_ratio(self.ratio_queue.median())
+            self.process_ratio(ratio)
             
     
     def process_ratio(self,ratio):
-#             
-#             #COARSE
-#             neg_coarse_ratio = 0.8  # ratio
-#             # FINE
-#             neg_fine_ratio   = 0.95 # ratio
-#             # NOTHING
-#             pos_fine_ratio   = 1.05 # ratio
-#             # FINE
-#             pos_coarse_ratio = 1.2  # ratio
-#             # COARSE
-#             delta_offset_step    = 0.5 # Volts
-# =============================================================================
-        # try finer/more accurate z-lock : 05.08.2024
-        
-        #COARSE
-        neg_coarse_ratio = 0.6  # ratio
-        # FINE
-        neg_fine_ratio   = 0.9 # ratio
-        # NOTHING
-        pos_fine_ratio   = 1.1 # ratio
-        # FINE
-        pos_coarse_ratio = 1.4  # ratio
-        # COARSE
         
         delta_offset_step_min = 0.2 # Volts
-        # delta_offset_step_max = 0.5 # Volts
-            
+        
 # =============================================================================        
 
         try:
