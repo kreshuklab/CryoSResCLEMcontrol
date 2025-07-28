@@ -72,9 +72,10 @@ class ImageToNDTiff(QObject):
         if self.dev_manager and hasattr(self.dev_manager,'Stage'):
             md_coord = {'x': self.dev_manager.Stage.step_counter['x'],
                         'y': self.dev_manager.Stage.step_counter['y'],
-                        'z': self.dev_manager.Stage.step_counter['z']}
+                        'z': self.dev_manager.Stage.step_counter['z'],
+                        't': self.frame_count}
         else:
-            md_coord = {'x': 0, 'y': 0, 'z': 0}
+            md_coord = {'x': 0, 'y': 0, 'z': 0, 't': self.frame_count}
         md_img = {'timestamp': str(self._cam.timestamp),
                   'frame_count': self.frame_count}
         self.current_file.put_image(md_coord,self._cam.frame_buffer,md_img)
